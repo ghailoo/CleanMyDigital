@@ -14,5 +14,9 @@ struct CleanMyDigitalApp: App {
             ContentView()
         }
         .windowResizability(.contentMinSize)
+
+        Settings {
+            SettingsView()
+        }
     }
 }

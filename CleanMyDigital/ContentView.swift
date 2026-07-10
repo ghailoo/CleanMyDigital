@@ -28,6 +28,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var sortOrder = [KeyPathComparator(\AudioFile.fileName)]
     @State private var selection: Set<AudioFile.ID> = []
+    @State private var discogsLookupFile: AudioFile?
 
     private var filteredFiles: [AudioFile] {
         var result = scanner.files
@@ -72,6 +73,9 @@ struct ContentView: View {
                       document: csvDocument,
                       contentType: .commaSeparatedText,
                       defaultFilename: "CleanMyDigital Report") { _ in }
+        .sheet(item: $discogsLookupFile) { file in
+            DiscogsLookupView(file: file)
+        }
         .navigationTitle("CleanMyDigital")
         .navigationSubtitle(navigationSubtitleText)
     }
@@ -230,6 +234,12 @@ struct ContentView: View {
         .contextMenu(forSelectionType: AudioFile.ID.self) { ids in
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting(Array(ids))
+            }
+            if ids.count == 1, let id = ids.first,
+               let file = scanner.files.first(where: { $0.id == id }) {
+                Button("Find on Discogs…") {
+                    discogsLookupFile = file
+                }
             }
         } primaryAction: { ids in
             NSWorkspace.shared.activateFileViewerSelecting(Array(ids))
