@@ -11,6 +11,9 @@ enum MetadataField: String, CaseIterable, Identifiable {
     case artist = "Artist"
     case album = "Album"
     case artwork = "Artwork"
+    case year = "Year"
+    case genre = "Genre"
+    case trackNumber = "Track Number"
 
     var id: String { rawValue }
 }
@@ -27,6 +30,9 @@ struct AudioFile: Identifiable, Sendable {
     let artist: String?
     let album: String?
     let hasArtwork: Bool
+    let year: String?
+    let genre: String?
+    let trackNumber: String?
 
     /// False when AVFoundation could not open the file at all.
     let isReadable: Bool
@@ -40,6 +46,9 @@ struct AudioFile: Identifiable, Sendable {
         if artist?.isEmpty ?? true { missing.append(.artist) }
         if album?.isEmpty ?? true { missing.append(.album) }
         if !hasArtwork { missing.append(.artwork) }
+        if year?.isEmpty ?? true { missing.append(.year) }
+        if genre?.isEmpty ?? true { missing.append(.genre) }
+        if trackNumber?.isEmpty ?? true { missing.append(.trackNumber) }
         return missing
     }
 

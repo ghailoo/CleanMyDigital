@@ -139,6 +139,16 @@ struct ContentView: View {
         }
     }
 
+    @TableColumnBuilder<AudioFile, KeyPathComparator<AudioFile>>
+    private var metadataColumns: some TableColumnContent<AudioFile, KeyPathComparator<AudioFile>> {
+        TableColumn("Title", value: \.title.orDash)
+        TableColumn("Artist", value: \.artist.orDash)
+        TableColumn("Album", value: \.album.orDash)
+        TableColumn("Year", value: \.year.orDash).width(50)
+        TableColumn("Genre", value: \.genre.orDash)
+        TableColumn("Track", value: \.trackNumber.orDash).width(50)
+    }
+
     private var table: some View {
         Table(filteredFiles, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("") { file in
@@ -154,9 +164,7 @@ struct ContentView: View {
                 Text(file.fileName).help(file.url.path(percentEncoded: false))
             }
 
-            TableColumn("Title", value: \.title.orDash)
-            TableColumn("Artist", value: \.artist.orDash)
-            TableColumn("Album", value: \.album.orDash)
+            metadataColumns
 
             TableColumn("Missing") { file in
                 if file.missingFields.isEmpty {

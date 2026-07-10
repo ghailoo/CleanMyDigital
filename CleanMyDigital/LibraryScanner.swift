@@ -110,7 +110,9 @@ final class LibraryScanner {
             AudioFile(url: url, fileName: url.lastPathComponent, fileExtension: ext,
                       sizeBytes: size, duration: nil,
                       title: nil, artist: nil, album: nil,
-                      hasArtwork: false, isReadable: false)
+                      hasArtwork: false,
+                      year: nil, genre: nil, trackNumber: nil,
+                      isReadable: false)
         }
 
         guard supportedExtensions.contains(ext) else { return unreadable() }
@@ -139,6 +141,12 @@ final class LibraryScanner {
                 album: await stringValue(in: items, common: .commonIdentifierAlbumName,
                                          keys: ["TALB", "TAL", "©alb", "album", "ALBUM"]),
                 hasArtwork: await artworkPresent(in: items),
+                year: await stringValue(in: items, common: .commonIdentifierCreationDate,
+                                        keys: ["TYER", "TDRC", "©day", "year", "YEAR"]),
+                genre: await stringValue(in: items, common: nil,
+                                         keys: ["TCON", "©gen", "gnre", "genre", "GENRE"]),
+                trackNumber: await stringValue(in: items, common: nil,
+                                               keys: ["TRCK", "trkn", "tracknumber", "TRACKNUMBER"]),
                 isReadable: true
             )
         } catch {
@@ -148,10 +156,12 @@ final class LibraryScanner {
 
     nonisolated private static func stringValue(
         in items: [AVMetadataItem],
-        common identifier: AVMetadataIdentifier,
+        common identifier: AVMetadataIdentifier?,
         keys: [String]
     ) async -> String? {
-        var candidates = AVMetadataItem.metadataItems(from: items, filteredByIdentifier: identifier)
+        var candidates = identifier.map {
+            AVMetadataItem.metadataItems(from: items, filteredByIdentifier: $0)
+        } ?? []
         candidates += items.filter { item in
             guard let key = item.key else { return false }
             return keys.contains(String(describing: key))
