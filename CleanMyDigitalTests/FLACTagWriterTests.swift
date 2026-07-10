@@ -109,6 +109,28 @@ struct FLACTagWriterTests {
         #expect(comments.contains("GENRE=Techno"))
     }
 
+    @Test func nativeReaderSeesFieldsAVFoundationCannotOnID3PrefixedFiles() throws {
+        let flacURL = try Self.makeTestFLAC()
+        defer { try? FileManager.default.removeItem(at: flacURL) }
+
+        var prefixedBytes = Data(Self.makeMinimalID3v2Tag())
+        prefixedBytes.append(try Data(contentsOf: flacURL))
+        try prefixedBytes.write(to: flacURL, options: .atomic)
+
+        var changes = TagChanges()
+        changes.artist = "Native Reader Artist"
+        changes.album = "Native Reader Album"
+        changes.genre = "Ambient"
+        changes.trackNumber = "7"
+        try FLACTagWriter.write(changes, to: flacURL)
+
+        let metadata = try FLACMetadataReader.read(contentsOf: flacURL)
+        #expect(metadata.artist == "Native Reader Artist")
+        #expect(metadata.album == "Native Reader Album")
+        #expect(metadata.genre == "Ambient")
+        #expect(metadata.trackNumber == "7")
+    }
+
     // MARK: - Helpers
 
     private enum ReadError: Error {

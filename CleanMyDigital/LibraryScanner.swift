@@ -266,25 +266,50 @@ final class LibraryScanner {
 
             let duration = try? await asset.load(.duration).seconds
 
+            // AVFoundation can't see anything for FLACs with a nonstandard
+            // ID3v2 prefix — it treats the whole file as ID3-only and never
+            // looks past the wrapper at the FLAC-native VORBIS_COMMENT/
+            // PICTURE blocks. Read those natively and fall back to them
+            // wherever AVFoundation came up empty, so scanning (and
+            // post-write re-inspection) stays accurate for those files.
+            let native = ext == "flac" ? try? FLACMetadataReader.read(contentsOf: url) : nil
+
+            var artwork = await artworkThumbnail(in: items)
+            if artwork == nil, let artworkData = native?.artworkData {
+                artwork = downscaledImage(from: artworkData, maxPixelSize: thumbnailMaxPixelSize)
+            }
+
             return AudioFile(
                 url: url,
                 fileName: url.lastPathComponent,
                 fileExtension: ext,
                 sizeBytes: size,
                 duration: duration,
-                title: await stringValue(in: items, common: .commonIdentifierTitle,
-                                         keys: ["TIT2", "TT2", "©nam", "title", "TITLE"]),
-                artist: await stringValue(in: items, common: .commonIdentifierArtist,
-                                          keys: ["TPE1", "TP1", "©ART", "artist", "ARTIST"]),
-                album: await stringValue(in: items, common: .commonIdentifierAlbumName,
-                                         keys: ["TALB", "TAL", "©alb", "album", "ALBUM"]),
-                artworkThumbnail: await artworkThumbnail(in: items),
-                year: await stringValue(in: items, common: .commonIdentifierCreationDate,
-                                        keys: ["TYER", "TDRC", "©day", "year", "YEAR"]),
-                genre: await stringValue(in: items, common: nil,
-                                         keys: ["TCON", "©gen", "gnre", "genre", "GENRE"]),
-                trackNumber: await stringValue(in: items, common: nil,
-                                               keys: ["TRCK", "trkn", "tracknumber", "TRACKNUMBER"]),
+                title: mergedValue(
+                    avFoundation: await stringValue(in: items, common: .commonIdentifierTitle,
+                                                     keys: ["TIT2", "TT2", "©nam", "title", "TITLE"]),
+                    native: native?.title),
+                artist: mergedValue(
+                    avFoundation: await stringValue(in: items, common: .commonIdentifierArtist,
+                                                     keys: ["TPE1", "TP1", "©ART", "artist", "ARTIST"]),
+                    native: native?.artist),
+                album: mergedValue(
+                    avFoundation: await stringValue(in: items, common: .commonIdentifierAlbumName,
+                                                     keys: ["TALB", "TAL", "©alb", "album", "ALBUM"]),
+                    native: native?.album),
+                artworkThumbnail: artwork,
+                year: mergedValue(
+                    avFoundation: await stringValue(in: items, common: .commonIdentifierCreationDate,
+                                                     keys: ["TYER", "TDRC", "©day", "year", "YEAR"]),
+                    native: native?.year),
+                genre: mergedValue(
+                    avFoundation: await stringValue(in: items, common: nil,
+                                                     keys: ["TCON", "©gen", "gnre", "genre", "GENRE"]),
+                    native: native?.genre),
+                trackNumber: mergedValue(
+                    avFoundation: await stringValue(in: items, common: nil,
+                                                     keys: ["TRCK", "trkn", "tracknumber", "TRACKNUMBER"]),
+                    native: native?.trackNumber),
                 category: category,
                 expectedArtist: expectedArtist,
                 isReadable: true
@@ -292,6 +317,14 @@ final class LibraryScanner {
         } catch {
             return unreadable()
         }
+    }
+
+    /// AVFoundation's reading wins when it found something — the native
+    /// FLAC reader only fills in what AVFoundation couldn't see at all.
+    nonisolated private static func mergedValue(avFoundation: String?, native: String?) -> String? {
+        if let avFoundation, !avFoundation.isEmpty { return avFoundation }
+        if let native, !native.isEmpty { return native }
+        return nil
     }
 
     nonisolated private static func stringValue(

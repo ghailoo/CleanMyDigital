@@ -19,63 +19,28 @@ import Foundation
 /// AVFoundation already reads it and we'd rather not touch data we don't
 /// need to understand.
 enum FLACTagWriter {
-    private static let streamInfoType: UInt8 = 0
-    private static let paddingType: UInt8 = 1
-    private static let vorbisCommentType: UInt8 = 4
-    private static let pictureType: UInt8 = 6
-    private static let frontCoverPictureType = 3
-
     static func write(_ changes: TagChanges, to url: URL) throws {
         let bytes = [UInt8](try Data(contentsOf: url))
 
-        let streamStart = id3PrefixLength(in: bytes) ?? 0
-        guard bytes.count >= streamStart + 4,
-              bytes[streamStart] == 0x66, bytes[streamStart + 1] == 0x4C,
-              bytes[streamStart + 2] == 0x61, bytes[streamStart + 3] == 0x43
-        else {
-            throw TagWriteError.malformedFile("Missing fLaC signature")
-        }
+        let streamStart = try FLACStream.streamStart(in: bytes)
         let id3Prefix = Array(bytes[0..<streamStart])
-
-        var blocks: [(type: UInt8, data: [UInt8])] = []
-        var offset = streamStart + 4
-        var audioStart: Int?
-        while offset + 4 <= bytes.count {
-            let headerByte = bytes[offset]
-            let isLast = (headerByte & 0x80) != 0
-            let type = headerByte & 0x7F
-            let length = Int(bytes[offset + 1]) << 16 | Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3])
-            let dataStart = offset + 4
-            let dataEnd = dataStart + length
-            guard dataEnd <= bytes.count else {
-                throw TagWriteError.malformedFile("Truncated metadata block")
-            }
-            blocks.append((type: type, data: Array(bytes[dataStart..<dataEnd])))
-            offset = dataEnd
-            if isLast {
-                audioStart = offset
-                break
-            }
-        }
-        guard let audioStart else {
-            throw TagWriteError.malformedFile("Metadata block chain never terminated")
-        }
+        let (blocks, audioStart) = try FLACStream.parseBlocks(in: bytes, streamStart: streamStart)
         let audioData = Array(bytes[audioStart...])
 
         var streamInfo: [UInt8]?
         var vorbisComment: [UInt8]?
         var pictures: [[UInt8]] = []
-        var others: [(type: UInt8, data: [UInt8])] = []
+        var others: [FLACMetadataBlock] = []
 
         for block in blocks {
             switch block.type {
-            case streamInfoType:
+            case FLACBlockType.streamInfo:
                 streamInfo = block.data
-            case vorbisCommentType:
+            case FLACBlockType.vorbisComment:
                 vorbisComment = block.data
-            case pictureType:
+            case FLACBlockType.picture:
                 pictures.append(block.data)
-            case paddingType:
+            case FLACBlockType.padding:
                 continue // dropped — sizes change anyway, no need to preserve reserve space
             default:
                 others.append(block)
@@ -90,15 +55,18 @@ enum FLACTagWriter {
 
         var newPictures = pictures
         if let artworkJPEG = changes.artworkJPEG,
-           !pictures.contains(where: { picturePictureType(of: $0) == frontCoverPictureType }) {
+           !pictures.contains(where: { FLACStream.pictureType(of: $0) == FLACBlockType.frontCoverPictureType }) {
             newPictures.append(makePictureBlock(jpeg: artworkJPEG))
         }
 
         // STREAMINFO must be first per spec; order after that doesn't
         // matter, so keep VORBIS_COMMENT/PICTUREs up front and preserve
         // everything else (SEEKTABLE, CUESHEET, APPLICATION…) as-is.
-        var outputBlocks: [(type: UInt8, data: [UInt8])] = [(streamInfoType, streamInfo), (vorbisCommentType, newVorbisComment)]
-        outputBlocks.append(contentsOf: newPictures.map { (pictureType, $0) })
+        var outputBlocks: [FLACMetadataBlock] = [
+            FLACMetadataBlock(type: FLACBlockType.streamInfo, data: streamInfo),
+            FLACMetadataBlock(type: FLACBlockType.vorbisComment, data: newVorbisComment),
+        ]
+        outputBlocks.append(contentsOf: newPictures.map { FLACMetadataBlock(type: FLACBlockType.picture, data: $0) })
         outputBlocks.append(contentsOf: others)
 
         var output = [UInt8]()
@@ -118,64 +86,11 @@ enum FLACTagWriter {
         try TagWriteHelpers.atomicReplace(Data(output), at: url)
     }
 
-    // MARK: - Nonstandard prepended ID3v2 tag
-
-    /// If `bytes` starts with "ID3", returns the byte length of that ID3v2
-    /// tag (header + content + optional footer) so the FLAC stream can be
-    /// located right after it. Returns nil for a standard file that starts
-    /// straight with "fLaC".
-    private static func id3PrefixLength(in bytes: [UInt8]) -> Int? {
-        guard bytes.count >= 10, bytes[0] == 0x49, bytes[1] == 0x44, bytes[2] == 0x33 else {
-            return nil
-        }
-        // bytes[3...4] = version, unused here since we never parse the content.
-        let flags = bytes[5]
-        let hasFooter = (flags & 0x10) != 0
-        // Tag size is a syncsafe 28-bit integer: 4 bytes, 7 significant bits each.
-        let size = bytes[6...9].reduce(0) { ($0 << 7) | Int($1 & 0x7F) }
-        let length = 10 + size + (hasFooter ? 10 : 0)
-        guard length >= 10, bytes.count >= length else { return nil }
-        return length
-    }
-
-    // MARK: - VORBIS_COMMENT (little-endian, unlike the rest of FLAC)
-
-    private static func parseVorbisComment(_ data: [UInt8]) -> (vendor: [UInt8], comments: [String]) {
-        var offset = 0
-        func readUInt32LE() -> Int {
-            guard offset + 4 <= data.count else { return 0 }
-            let value = Int(data[offset]) | Int(data[offset + 1]) << 8
-                | Int(data[offset + 2]) << 16 | Int(data[offset + 3]) << 24
-            offset += 4
-            return value
-        }
-
-        let vendorLength = readUInt32LE()
-        let vendorEnd = min(offset + max(vendorLength, 0), data.count)
-        let vendor = Array(data[offset..<vendorEnd])
-        offset = vendorEnd
-
-        let commentCount = readUInt32LE()
-        var comments: [String] = []
-        if commentCount > 0 {
-            for _ in 0..<commentCount {
-                let commentLength = readUInt32LE()
-                let end = min(offset + max(commentLength, 0), data.count)
-                guard offset <= end else { break }
-                if let string = String(bytes: data[offset..<end], encoding: .utf8) {
-                    comments.append(string)
-                }
-                offset = end
-            }
-        }
-        return (vendor, comments)
-    }
-
     private static func mergeVorbisComment(existing: [UInt8]?, changes: TagChanges) -> [UInt8] {
         var vendor: [UInt8]
         var comments: [String]
         if let existing {
-            (vendor, comments) = parseVorbisComment(existing)
+            (vendor, comments) = FLACStream.parseVorbisComment(existing)
         } else {
             vendor = Array("CleanMyDigital".utf8)
             comments = []
@@ -224,7 +139,7 @@ enum FLACTagWriter {
             output.append(UInt8((value >> 8) & 0xFF))
             output.append(UInt8(value & 0xFF))
         }
-        appendUInt32BE(frontCoverPictureType)
+        appendUInt32BE(FLACBlockType.frontCoverPictureType)
         let mime = Array("image/jpeg".utf8)
         appendUInt32BE(mime.count)
         output.append(contentsOf: mime)
@@ -237,10 +152,5 @@ enum FLACTagWriter {
         appendUInt32BE(jpegBytes.count)
         output.append(contentsOf: jpegBytes)
         return output
-    }
-
-    private static func picturePictureType(of block: [UInt8]) -> Int? {
-        guard block.count >= 4 else { return nil }
-        return Int(block[0]) << 24 | Int(block[1]) << 16 | Int(block[2]) << 8 | Int(block[3])
     }
 }
