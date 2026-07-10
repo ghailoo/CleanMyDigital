@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import ID3TagEditor
 
 /// Reads a WAV's LIST/INFO and "id3 " chunks natively.
 ///
@@ -35,23 +34,8 @@ enum RIFFMetadataReader {
 
         // The id3 chunk is the richer, more standard source — its values
         // win over LIST/INFO wherever both are present.
-        if let id3Chunk = chunks.first(where: { RIFFStream.isID3Chunk($0) }),
-           let tag = try? ID3TagEditor().read(mp3: Data(id3Chunk.data)) {
-            if let f = tag.frames[.title] as? ID3FrameWithStringContent { metadata.title = f.content }
-            if let f = tag.frames[.artist] as? ID3FrameWithStringContent { metadata.artist = f.content }
-            if let f = tag.frames[.album] as? ID3FrameWithStringContent { metadata.album = f.content }
-            if let f = tag.frames[.recordingYear] as? ID3FrameWithIntegerContent, let value = f.value {
-                metadata.year = String(value)
-            }
-            if let f = tag.frames[.genre] as? ID3FrameGenre {
-                metadata.genre = f.description ?? f.identifier.map { String(describing: $0) }
-            }
-            if let f = tag.frames[.trackPosition] as? ID3FramePartOfTotal {
-                metadata.trackNumber = f.total.map { "\(f.part)/\($0)" } ?? String(f.part)
-            }
-            if let picture = tag.frames[.attachedPicture(.frontCover)] as? ID3FrameAttachedPicture {
-                metadata.artworkData = picture.picture
-            }
+        if let id3Chunk = chunks.first(where: { RIFFStream.isID3Chunk($0) }) {
+            ID3ChunkMetadata.merge(id3ChunkData: id3Chunk.data, into: &metadata)
         }
 
         return metadata

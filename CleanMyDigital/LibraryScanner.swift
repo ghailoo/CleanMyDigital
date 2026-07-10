@@ -269,15 +269,18 @@ final class LibraryScanner {
             // AVFoundation's reading is incomplete/unreliable for some
             // container formats — it can't see anything for FLACs with a
             // nonstandard ID3v2 prefix (treats the whole file as ID3-only),
-            // and for WAV it translates LIST/INFO fields into an
-            // undocumented identifier namespace scanning doesn't look for.
-            // Read those natively and fall back to them wherever
-            // AVFoundation came up empty, so scanning (and post-write
-            // re-inspection) stays accurate for those files.
+            // for WAV it translates LIST/INFO fields into an undocumented
+            // identifier namespace scanning doesn't look for, and for AIFF
+            // it can serve stale metadata when re-reading a URL it already
+            // opened earlier in the same process (e.g. right after Apply
+            // to File writes new tags). Read those natively and fall back
+            // to them wherever AVFoundation came up empty, so scanning
+            // (and post-write re-inspection) stays accurate for those files.
             let native: NativeAudioMetadata?
             switch ext {
             case "flac": native = try? FLACMetadataReader.read(contentsOf: url)
             case "wav", "wave": native = try? RIFFMetadataReader.read(contentsOf: url)
+            case "aif", "aiff", "aifc": native = try? AIFFMetadataReader.read(contentsOf: url)
             default: native = nil
             }
 

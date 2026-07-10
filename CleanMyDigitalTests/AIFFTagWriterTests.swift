@@ -71,6 +71,31 @@ struct AIFFTagWriterTests {
         #expect((id3Tag.frames[.artist] as? ID3FrameWithStringContent)?.content == "New AIFF Artist")
     }
 
+    @Test func nativeReaderSeesWrittenFields() throws {
+        let aiffURL = try Self.makeTestAIFF()
+        defer { try? FileManager.default.removeItem(at: aiffURL) }
+
+        let jpeg = try Self.makeTestJPEG()
+        var changes = TagChanges()
+        changes.title = "Native AIFF Title"
+        changes.artist = "Native AIFF Artist"
+        changes.album = "Native AIFF Album"
+        changes.year = "2021"
+        changes.genre = "IDM"
+        changes.trackNumber = "4"
+        changes.artworkJPEG = jpeg
+        try AIFFTagWriter.write(changes, to: aiffURL)
+
+        let metadata = try AIFFMetadataReader.read(contentsOf: aiffURL)
+        #expect(metadata.title == "Native AIFF Title")
+        #expect(metadata.artist == "Native AIFF Artist")
+        #expect(metadata.album == "Native AIFF Album")
+        #expect(metadata.year == "2021")
+        #expect(metadata.genre == "IDM")
+        #expect(metadata.trackNumber == "4")
+        #expect(metadata.artworkData?.isEmpty == false)
+    }
+
     @Test func preservesOtherChunksExactly() throws {
         let aiffURL = try Self.makeTestAIFF()
         defer { try? FileManager.default.removeItem(at: aiffURL) }
