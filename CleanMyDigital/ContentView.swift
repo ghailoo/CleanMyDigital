@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var showFolderPicker = false
     @State private var showCSVExporter = false
     @State private var csvDocument = CSVDocument(text: "")
+    @State private var selectedCategory: LibraryCategory = .albums
     @State private var filter: Filter = .issues
     @State private var searchText = ""
     @State private var sortOrder = [KeyPathComparator(\AudioFile.fileName)]
@@ -64,7 +65,7 @@ struct ContentView: View {
         .fileImporter(isPresented: $showFolderPicker,
                       allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result {
-                Task { await scanner.scan(folder: url) }
+                Task { await scanner.scan(folder: url, category: selectedCategory) }
             }
         }
         .fileExporter(isPresented: $showCSVExporter,
@@ -72,7 +73,14 @@ struct ContentView: View {
                       contentType: .commaSeparatedText,
                       defaultFilename: "CleanMyDigital Report") { _ in }
         .navigationTitle("CleanMyDigital")
-        .navigationSubtitle(scanner.scannedFolder?.path(percentEncoded: false) ?? "")
+        .navigationSubtitle(navigationSubtitleText)
+    }
+
+    private var navigationSubtitleText: String {
+        guard let scannedFolder = scanner.scannedFolder else { return "" }
+        let path = scannedFolder.path(percentEncoded: false)
+        guard let category = scanner.category else { return path }
+        return "\(path) — \(category.rawValue)"
     }
 
     // MARK: - States
@@ -169,6 +177,7 @@ struct ContentView: View {
     private var metadataColumns: some TableColumnContent<AudioFile, KeyPathComparator<AudioFile>> {
         TableColumn("Title", value: \.title.orDash)
         TableColumn("Artist", value: \.artist.orDash)
+        TableColumn("Expected Artist", value: \.expectedArtist.orDash)
         TableColumn("Album", value: \.album.orDash)
         TableColumn("Year", value: \.year.orDash).width(50)
         TableColumn("Genre", value: \.genre.orDash)
@@ -186,7 +195,7 @@ struct ContentView: View {
                 Image(systemName: statusSymbol(for: file))
                     .foregroundStyle(statusColor(for: file))
                     .help(file.isReadable
-                          ? file.missingFields.map(\.rawValue).joined(separator: ", ")
+                          ? file.issues.map(\.label).joined(separator: ", ")
                           : "Could not read this file")
             }
             .width(24)
@@ -197,17 +206,18 @@ struct ContentView: View {
 
             metadataColumns
 
-            TableColumn("Missing") { file in
-                if file.missingFields.isEmpty {
+            TableColumn("Issues") { file in
+                if file.issues.isEmpty {
                     Text("–").foregroundStyle(.tertiary)
                 } else {
                     HStack(spacing: 4) {
-                        ForEach(file.missingFields) { field in
-                            Text(field.rawValue)
+                        ForEach(file.issues) { issue in
+                            Text(issue.label)
                                 .font(.caption2)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(.orange.opacity(0.2), in: Capsule())
+                                .background(issue.isArtistMismatch ? Color.red.opacity(0.2) : Color.orange.opacity(0.2),
+                                            in: Capsule())
                         }
                     }
                 }
@@ -245,6 +255,14 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem {
+            Picker("Library Type", selection: $selectedCategory) {
+                ForEach(LibraryCategory.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help("Tag the folder you're about to scan as Singles, Albums, or Compilations")
+        }
+        ToolbarItem {
             Button("Choose Folder…", systemImage: "folder") {
                 showFolderPicker = true
             }
@@ -252,7 +270,7 @@ struct ContentView: View {
         ToolbarItem {
             Button("Rescan", systemImage: "arrow.clockwise") {
                 if let folder = scanner.scannedFolder {
-                    Task { await scanner.scan(folder: folder) }
+                    Task { await scanner.scan(folder: folder, category: scanner.category ?? selectedCategory) }
                 }
             }
             .disabled(scanner.scannedFolder == nil
@@ -277,35 +295,37 @@ struct ContentView: View {
 
     private func copyReport() {
         let flagged = scanner.files.filter(\.hasIssues)
-        var lines = ["CleanMyDigital report — \(flagged.count) file(s) with missing metadata"]
+        var lines = ["CleanMyDigital report — \(flagged.count) file(s) with issues"]
         for file in flagged {
-            let missing = file.isReadable
-                ? file.missingFields.map(\.rawValue).joined(separator: ", ")
+            let issues = file.isReadable
+                ? file.issues.map(\.label).joined(separator: ", ")
                 : "unreadable file"
-            lines.append("\(file.url.path(percentEncoded: false)) — missing: \(missing)")
+            lines.append("[\(file.category.rawValue)] \(file.url.path(percentEncoded: false)) — issues: \(issues)")
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }
 
     private func csvReport() -> String {
-        let header = ["Full Path", "File Name", "Title", "Artist", "Album", "Year", "Genre",
-                       "Track Number", "Missing Fields", "Duration", "Size"]
+        let header = ["Full Path", "File Name", "Category", "Title", "Artist", "Expected Artist", "Album",
+                       "Year", "Genre", "Track Number", "Issues", "Duration", "Size"]
         var lines = [header.map(csvField).joined(separator: ",")]
         for file in scanner.files {
-            let missing = file.isReadable
-                ? file.missingFields.map(\.rawValue).joined(separator: "; ")
+            let issues = file.isReadable
+                ? file.issues.map(\.label).joined(separator: "; ")
                 : "unreadable file"
             let row = [
                 file.url.path(percentEncoded: false),
                 file.fileName,
+                file.category.rawValue,
                 file.title ?? "",
                 file.artist ?? "",
+                file.expectedArtist ?? "",
                 file.album ?? "",
                 file.year ?? "",
                 file.genre ?? "",
                 file.trackNumber ?? "",
-                missing,
+                issues,
                 file.formattedDuration,
                 file.formattedSize,
             ]

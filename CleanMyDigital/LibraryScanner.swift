@@ -23,6 +23,7 @@ final class LibraryScanner {
     private(set) var scannedCount = 0
     private(set) var totalCount = 0
     private(set) var scannedFolder: URL?
+    private(set) var category: LibraryCategory?
 
     /// File extensions AVFoundation can read metadata from.
     nonisolated static let supportedExtensions: Set<String> = [
@@ -40,7 +41,7 @@ final class LibraryScanner {
         totalCount > 0 ? Double(scannedCount) / Double(totalCount) : 0
     }
 
-    func scan(folder: URL) async {
+    func scan(folder: URL, category: LibraryCategory) async {
         let didAccess = folder.startAccessingSecurityScopedResource()
         defer { if didAccess { folder.stopAccessingSecurityScopedResource() } }
 
@@ -49,6 +50,7 @@ final class LibraryScanner {
         scannedCount = 0
         totalCount = 0
         scannedFolder = folder
+        self.category = category
 
         let urls = await Task.detached(priority: .userInitiated) {
             Self.audioFileURLs(in: folder)
@@ -67,14 +69,16 @@ final class LibraryScanner {
             var inFlight = 0
 
             while inFlight < maxConcurrent, let url = iterator.next() {
-                group.addTask { await Self.inspect(url) }
+                let expected = Self.expectedArtist(for: url, in: folder)
+                group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 inFlight += 1
             }
             for await file in group {
                 results.append(file)
                 scannedCount += 1
                 if let url = iterator.next() {
-                    group.addTask { await Self.inspect(url) }
+                    let expected = Self.expectedArtist(for: url, in: folder)
+                    group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 }
             }
         }
@@ -104,7 +108,21 @@ final class LibraryScanner {
         return urls
     }
 
-    nonisolated private static func inspect(_ url: URL) async -> AudioFile {
+    /// The first path component of `url` under `folder` — the "ArtistName"
+    /// folder Singles & Albums are organized by. Nil if `url` sits directly
+    /// in `folder` with no intervening subfolder.
+    nonisolated private static func expectedArtist(for url: URL, in folder: URL) -> String? {
+        let rootComponents = folder.standardizedFileURL.pathComponents
+        let fileComponents = url.standardizedFileURL.pathComponents
+        guard fileComponents.count > rootComponents.count + 1,
+              Array(fileComponents.prefix(rootComponents.count)) == rootComponents
+        else { return nil }
+        return fileComponents[rootComponents.count]
+    }
+
+    nonisolated private static func inspect(
+        _ url: URL, expectedArtist: String?, category: LibraryCategory
+    ) async -> AudioFile {
         let ext = url.pathExtension.lowercased()
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
 
@@ -114,6 +132,7 @@ final class LibraryScanner {
                       title: nil, artist: nil, album: nil,
                       artworkThumbnail: nil,
                       year: nil, genre: nil, trackNumber: nil,
+                      category: category, expectedArtist: expectedArtist,
                       isReadable: false)
         }
 
@@ -149,6 +168,8 @@ final class LibraryScanner {
                                          keys: ["TCON", "©gen", "gnre", "genre", "GENRE"]),
                 trackNumber: await stringValue(in: items, common: nil,
                                                keys: ["TRCK", "trkn", "tracknumber", "TRACKNUMBER"]),
+                category: category,
+                expectedArtist: expectedArtist,
                 isReadable: true
             )
         } catch {
