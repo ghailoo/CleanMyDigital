@@ -21,6 +21,8 @@ struct ContentView: View {
 
     @State private var scanner = LibraryScanner()
     @State private var showFolderPicker = false
+    @State private var showCSVExporter = false
+    @State private var csvDocument = CSVDocument(text: "")
     @State private var filter: Filter = .issues
     @State private var searchText = ""
     @State private var sortOrder = [KeyPathComparator(\AudioFile.fileName)]
@@ -65,6 +67,10 @@ struct ContentView: View {
                 Task { await scanner.scan(folder: url) }
             }
         }
+        .fileExporter(isPresented: $showCSVExporter,
+                      document: csvDocument,
+                      contentType: .commaSeparatedText,
+                      defaultFilename: "CleanMyDigital Report") { _ in }
         .navigationTitle("CleanMyDigital")
         .navigationSubtitle(scanner.scannedFolder?.path(percentEncoded: false) ?? "")
     }
@@ -234,6 +240,14 @@ struct ContentView: View {
             .disabled(scanner.files.isEmpty)
             .help("Copy the list of files with missing metadata to the clipboard")
         }
+        ToolbarItem {
+            Button("Export CSV…", systemImage: "square.and.arrow.up") {
+                csvDocument = CSVDocument(text: csvReport())
+                showCSVExporter = true
+            }
+            .disabled(scanner.files.isEmpty)
+            .help("Export every scanned file's metadata as a CSV file")
+        }
     }
 
     private func copyReport() {
@@ -247,6 +261,59 @@ struct ContentView: View {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+    }
+
+    private func csvReport() -> String {
+        let header = ["Full Path", "File Name", "Title", "Artist", "Album", "Year", "Genre",
+                       "Track Number", "Missing Fields", "Duration", "Size"]
+        var lines = [header.map(csvField).joined(separator: ",")]
+        for file in scanner.files {
+            let missing = file.isReadable
+                ? file.missingFields.map(\.rawValue).joined(separator: "; ")
+                : "unreadable file"
+            let row = [
+                file.url.path(percentEncoded: false),
+                file.fileName,
+                file.title ?? "",
+                file.artist ?? "",
+                file.album ?? "",
+                file.year ?? "",
+                file.genre ?? "",
+                file.trackNumber ?? "",
+                missing,
+                file.formattedDuration,
+                file.formattedSize,
+            ]
+            lines.append(row.map(csvField).joined(separator: ","))
+        }
+        return lines.joined(separator: "\r\n")
+    }
+
+    private func csvField(_ value: String) -> String {
+        guard value.contains(",") || value.contains("\"") || value.contains("\n") || value.contains("\r") else {
+            return value
+        }
+        return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+}
+
+private struct CSVDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.commaSeparatedText] }
+    static var writableContentTypes: [UTType] { [.commaSeparatedText] }
+
+    var text: String
+
+    init(text: String) {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        text = configuration.file.regularFileContents
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
 
