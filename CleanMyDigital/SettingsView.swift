@@ -16,6 +16,10 @@ struct SettingsView: View {
                 .tabItem {
                     Label("MusicBrainz", systemImage: "music.quarternote.3")
                 }
+            WritingSettingsView()
+                .tabItem {
+                    Label("Writing", systemImage: "pencil")
+                }
         }
         .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
@@ -55,6 +59,25 @@ private struct MusicBrainzSettingsView: View {
                     .font(.caption)
             } footer: {
                 Text("MusicBrainz needs no API key, but its etiquette requires a descriptive User-Agent with contact info — this is embedded as \"CleanMyDigital/1.0 (email)\", and requests are limited to 1 per second.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct WritingSettingsView: View {
+    @AppStorage("backupOriginalsBeforeWriting") private var backupOriginalsBeforeWriting = true
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Back up originals before writing", isOn: $backupOriginalsBeforeWriting)
+            } footer: {
+                Text("Before CleanMyDigital changes a file for the first time, it copies the original into a "
+                     + "\"\(BackupManager.backupFolderName)\" folder at the scanned folder's root, mirroring its "
+                     + "relative path.")
                     .foregroundStyle(.secondary)
             }
         }

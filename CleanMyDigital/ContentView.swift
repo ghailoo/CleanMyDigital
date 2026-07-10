@@ -15,6 +15,7 @@ struct ContentView: View {
         case issues = "Missing Metadata"
         case noMetadata = "No Metadata at All"
         case complete = "Complete"
+        case found = "Found"
 
         var id: String { rawValue }
     }
@@ -29,6 +30,9 @@ struct ContentView: View {
     @State private var sortOrder = [KeyPathComparator(\AudioFile.fileName)]
     @State private var selection: Set<AudioFile.ID> = []
     @State private var metadataLookupFile: AudioFile?
+    @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
+    @AppStorage("discogsToken") private var discogsToken = ""
+    @AppStorage("musicBrainzContact") private var musicBrainzContact = ""
 
     private var filteredFiles: [AudioFile] {
         var result = scanner.files
@@ -37,6 +41,7 @@ struct ContentView: View {
         case .issues: result = result.filter(\.hasIssues)
         case .noMetadata: result = result.filter(\.hasNoMetadata)
         case .complete: result = result.filter { !$0.hasIssues }
+        case .found: result = result.filter { scanner.lookupResults[$0.url]?.isFound == true }
         }
         if !searchText.isEmpty {
             result = result.filter {
@@ -74,7 +79,7 @@ struct ContentView: View {
                       contentType: .commaSeparatedText,
                       defaultFilename: "CleanMyDigital Report") { _ in }
         .sheet(item: $metadataLookupFile) { file in
-            MetadataLookupView(file: file)
+            MetadataLookupView(file: file, scanner: scanner, initialProvider: metadataLookupInitialProvider)
         }
         .navigationTitle("CleanMyDigital")
         .navigationSubtitle(navigationSubtitleText)
@@ -139,6 +144,14 @@ struct ContentView: View {
             stat("No metadata", scanner.files.count(where: \.hasNoMetadata), color: .red)
             stat("Complete", scanner.files.count { !$0.hasIssues }, color: .green)
             Spacer()
+            if scanner.isLookingUp {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking up \(scanner.lookupCompletedCount) of \(scanner.lookupTotalCount)…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Picker("Filter", selection: $filter) {
                 ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -174,6 +187,29 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+        }
+    }
+
+    @ViewBuilder
+    private func lookupBadge(for file: AudioFile) -> some View {
+        switch scanner.lookupResults[file.url] {
+        case .found(let provider, _, _):
+            Text("Found")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.green)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.green.opacity(0.15), in: Capsule())
+                .help("Found via \(provider.rawValue)")
+        case .noMatch:
+            Text("No match")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.gray.opacity(0.15), in: Capsule())
+        case nil:
+            EmptyView()
         }
     }
 
@@ -232,6 +268,11 @@ struct ContentView: View {
             }
             .width(min: 180)
 
+            TableColumn("Lookup") { file in
+                lookupBadge(for: file)
+            }
+            .width(72)
+
             TableColumn("Length", value: \.formattedDuration).width(60)
             TableColumn("Size", value: \.formattedSize).width(80)
         }
@@ -242,6 +283,7 @@ struct ContentView: View {
             if ids.count == 1, let id = ids.first,
                let file = scanner.files.first(where: { $0.id == id }) {
                 Button("Find Metadata…") {
+                    metadataLookupInitialProvider = scanner.lookupResults[file.url]?.provider ?? .discogs
                     metadataLookupFile = file
                 }
             }
@@ -305,6 +347,26 @@ struct ContentView: View {
             .disabled(scanner.files.isEmpty)
             .help("Export every scanned file's metadata as a CSV file")
         }
+        ToolbarItem {
+            Button(scanner.isLookingUp ? "Stop" : "Find All Metadata",
+                   systemImage: scanner.isLookingUp ? "stop.fill" : "magnifyingglass") {
+                if scanner.isLookingUp {
+                    scanner.cancelLookup()
+                } else {
+                    scanner.findAllMetadata(discogsToken: discogsToken, musicBrainzContact: musicBrainzContact)
+                }
+            }
+            .disabled(!scanner.isLookingUp && !canFindAllMetadata)
+            .help(scanner.isLookingUp
+                  ? "Stop the batch lookup — matches found so far are kept"
+                  : "Search Discogs and MusicBrainz for every flagged file's missing metadata")
+        }
+    }
+
+    private var canFindAllMetadata: Bool {
+        scanner.state == .finished
+            && scanner.files.contains(where: \.hasIssues)
+            && (!discogsToken.isEmpty || !musicBrainzContact.isEmpty)
     }
 
     private func copyReport() {

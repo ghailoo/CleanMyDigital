@@ -25,6 +25,15 @@ final class LibraryScanner {
     private(set) var scannedFolder: URL?
     private(set) var category: LibraryCategory?
 
+    /// Batch "Find All Metadata" results, keyed by file URL. Session-only —
+    /// cleared whenever a new scan starts.
+    private(set) var lookupResults: [URL: LookupOutcome] = [:]
+    private(set) var isLookingUp = false
+    private(set) var lookupCompletedCount = 0
+    private(set) var lookupTotalCount = 0
+
+    private var lookupTask: Task<Void, Never>?
+
     /// File extensions AVFoundation can read metadata from.
     nonisolated static let supportedExtensions: Set<String> = [
         "mp3", "m4a", "m4b", "m4p", "aac", "flac", "wav", "wave",
@@ -51,6 +60,13 @@ final class LibraryScanner {
         totalCount = 0
         scannedFolder = folder
         self.category = category
+
+        lookupTask?.cancel()
+        lookupTask = nil
+        lookupResults = [:]
+        isLookingUp = false
+        lookupCompletedCount = 0
+        lookupTotalCount = 0
 
         let urls = await Task.detached(priority: .userInitiated) {
             Self.audioFileURLs(in: folder)
@@ -89,6 +105,103 @@ final class LibraryScanner {
         state = .finished
     }
 
+    /// Writes `changes` to `file`'s tags, backing up the original first if
+    /// requested, then re-reads the file and updates `files` in place so
+    /// the table reflects the change immediately.
+    ///
+    /// `scan(folder:)` releases its security-scoped access to the folder as
+    /// soon as the scan finishes, so writes re-acquire it for the duration
+    /// of the operation — access extends to the whole subtree the folder
+    /// covers, including this file.
+    func applyTagChanges(_ changes: TagChanges, to file: AudioFile, backupFirst: Bool) async throws {
+        guard let scannedFolder else {
+            throw TagWriteError.underlying(CocoaError(.fileNoSuchFile))
+        }
+
+        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
+        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+
+        if backupFirst {
+            try BackupManager.backupIfNeeded(fileURL: file.url, root: scannedFolder)
+        }
+
+        try await TagWriterRouter.write(changes, to: file.url)
+
+        let expected = Self.expectedArtist(for: file.url, in: scannedFolder)
+        let updated = await Self.inspect(file.url, expectedArtist: expected, category: file.category)
+        if let index = files.firstIndex(where: { $0.url == file.url }) {
+            files[index] = updated
+        }
+        lookupResults.removeValue(forKey: file.url)
+    }
+
+    /// Looks up every flagged file against Discogs, then MusicBrainz, one at
+    /// a time — both clients pace their own requests, so this just needs to
+    /// stay sequential and stop promptly on cancellation.
+    func findAllMetadata(discogsToken: String, musicBrainzContact: String) {
+        guard !isLookingUp else { return }
+        let targets = files.filter(\.hasIssues)
+        guard !targets.isEmpty else { return }
+
+        lookupCompletedCount = 0
+        lookupTotalCount = targets.count
+        isLookingUp = true
+
+        lookupTask = Task {
+            for file in targets {
+                if Task.isCancelled { break }
+                let outcome = await Self.lookupOutcome(
+                    for: file, discogsToken: discogsToken, musicBrainzContact: musicBrainzContact)
+                if Task.isCancelled { break }
+                lookupResults[file.url] = outcome
+                lookupCompletedCount += 1
+            }
+            isLookingUp = false
+            lookupTask = nil
+        }
+    }
+
+    /// Stops the batch lookup after the in-flight request finishes —
+    /// whatever was already found stays in `lookupResults`.
+    func cancelLookup() {
+        lookupTask?.cancel()
+    }
+
+    /// Searches Discogs first; only falls through to MusicBrainz if Discogs
+    /// errored or its top candidate wouldn't fill any of this file's
+    /// missing fields.
+    nonisolated private static func lookupOutcome(
+        for file: AudioFile, discogsToken: String, musicBrainzContact: String
+    ) async -> LookupOutcome {
+        let missing = file.missingFields
+        guard !missing.isEmpty else { return .noMatch }
+
+        if !discogsToken.isEmpty {
+            let query = DiscogsQuery(for: file)
+            if let releases = try? await DiscogsClient.search(artist: query.artist, track: query.track, token: discogsToken),
+               let top = releases.first {
+                let fillable = top.fillableFields(missing: missing)
+                if !fillable.isEmpty {
+                    return .found(provider: .discogs, candidate: .discogs(top), fillableFields: fillable)
+                }
+            }
+        }
+
+        if !musicBrainzContact.isEmpty {
+            let query = MusicBrainzQuery(for: file)
+            if let recordings = try? await MusicBrainzClient.searchRecordings(
+                artist: query.artist, recording: query.recording, contactEmail: musicBrainzContact),
+               let top = recordings.first {
+                let fillable = top.fillableFields(missing: missing)
+                if !fillable.isEmpty {
+                    return .found(provider: .musicBrainz, candidate: .musicBrainz(top), fillableFields: fillable)
+                }
+            }
+        }
+
+        return .noMatch
+    }
+
     nonisolated private static func audioFileURLs(in folder: URL) -> [URL] {
         let keys: [URLResourceKey] = [.isRegularFileKey]
         guard let enumerator = FileManager.default.enumerator(
@@ -99,6 +212,10 @@ final class LibraryScanner {
 
         var urls: [URL] = []
         for case let url as URL in enumerator {
+            if url.lastPathComponent == BackupManager.backupFolderName {
+                enumerator.skipDescendants()
+                continue
+            }
             let ext = url.pathExtension.lowercased()
             guard supportedExtensions.contains(ext) || unsupportedAudioExtensions.contains(ext),
                   (try? url.resourceValues(forKeys: Set(keys)).isRegularFile) == true

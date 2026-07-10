@@ -8,20 +8,20 @@ import SwiftUI
 
 struct MetadataLookupView: View {
     let file: AudioFile
+    let scanner: LibraryScanner
 
-    enum Provider: String, CaseIterable, Identifiable {
-        case discogs = "Discogs"
-        case musicBrainz = "MusicBrainz"
+    @State private var provider: MetadataProvider
 
-        var id: String { rawValue }
+    init(file: AudioFile, scanner: LibraryScanner, initialProvider: MetadataProvider = .discogs) {
+        self.file = file
+        self.scanner = scanner
+        _provider = State(initialValue: initialProvider)
     }
-
-    @State private var provider: Provider = .discogs
 
     var body: some View {
         VStack(spacing: 0) {
             Picker("Provider", selection: $provider) {
-                ForEach(Provider.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(MetadataProvider.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -38,9 +38,70 @@ struct MetadataLookupView: View {
     private var content: some View {
         switch provider {
         case .discogs:
-            DiscogsTabView(file: file)
+            DiscogsTabView(file: file, scanner: scanner)
         case .musicBrainz:
-            MusicBrainzTabView(file: file)
+            MusicBrainzTabView(file: file, scanner: scanner)
+        }
+    }
+}
+
+/// Shared "Apply to File" affordance used by both comparison views. Writes
+/// only the fields the candidate would fill (never anything already
+/// present), backing up the original first if that setting is on, then
+/// re-inspects the file so the results table refreshes immediately.
+private struct ApplyToFileSection: View {
+    let file: AudioFile
+    let scanner: LibraryScanner
+    let fillable: Set<MetadataField>
+    let buildChanges: () async throws -> TagChanges
+
+    @AppStorage("backupOriginalsBeforeWriting") private var backupOriginalsBeforeWriting = true
+    @State private var isApplying = false
+    @State private var outcome: Result<Set<MetadataField>, Error>?
+
+    private var canWriteFormat: Bool { TagWriterRouter.canWrite(fileExtension: file.fileExtension) }
+    private var isApplied: Bool {
+        if case .success = outcome { return true }
+        return false
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button("Apply to File") { Task { await apply() } }
+                    .disabled(fillable.isEmpty || !canWriteFormat || isApplying || isApplied)
+                if isApplying { ProgressView().controlSize(.small) }
+            }
+            if !canWriteFormat {
+                Text("This format can't be written yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let outcome {
+                switch outcome {
+                case .success(let filled):
+                    Label("Applied: \(filled.map(\.rawValue).sorted().joined(separator: ", "))",
+                          systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                case .failure(let error):
+                    Label(error.localizedDescription, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    private func apply() async {
+        isApplying = true
+        defer { isApplying = false }
+        do {
+            let changes = try await buildChanges()
+            try await scanner.applyTagChanges(changes, to: file, backupFirst: backupOriginalsBeforeWriting)
+            outcome = .success(fillable)
+        } catch {
+            outcome = .failure(error)
         }
     }
 }
@@ -49,6 +110,7 @@ struct MetadataLookupView: View {
 
 private struct DiscogsTabView: View {
     let file: AudioFile
+    let scanner: LibraryScanner
 
     @AppStorage("discogsToken") private var discogsToken = ""
     @Environment(\.dismiss) private var dismiss
@@ -94,7 +156,7 @@ private struct DiscogsTabView: View {
     @ViewBuilder
     private var content: some View {
         if let selectedRelease {
-            ComparisonView(file: file, release: selectedRelease)
+            ComparisonView(file: file, release: selectedRelease, scanner: scanner)
         } else {
             resultsList
         }
@@ -187,6 +249,7 @@ private struct DiscogsResultRow: View {
 private struct ComparisonView: View {
     let file: AudioFile
     let release: DiscogsRelease
+    let scanner: LibraryScanner
 
     @AppStorage("discogsToken") private var discogsToken = ""
 
@@ -245,6 +308,23 @@ private struct ComparisonView: View {
 
                 if let releaseDetail, !releaseDetail.tracks.isEmpty {
                     trackSection(releaseDetail)
+                }
+
+                ApplyToFileSection(file: file, scanner: scanner, fillable: fillable) {
+                    var changes = TagChanges()
+                    if fillable.contains(.artist) { changes.artist = release.parsedArtist }
+                    if fillable.contains(.album) { changes.album = release.parsedReleaseTitle }
+                    if fillable.contains(.year) { changes.year = release.year }
+                    if fillable.contains(.genre) {
+                        changes.genre = release.combinedGenre.isEmpty ? nil : release.combinedGenre
+                    }
+                    if fillable.contains(.title) { changes.title = matchedTrack?.title }
+                    if fillable.contains(.trackNumber) { changes.trackNumber = matchedTrack?.position }
+                    if fillable.contains(.artwork), let url = release.coverImageURL ?? release.thumbURL {
+                        changes.artworkJPEG = try await ArtworkDownloader.downloadJPEG(
+                            from: url, headers: ["Authorization": "Discogs token=\(discogsToken)"])
+                    }
+                    return changes
                 }
 
                 actions
@@ -437,6 +517,7 @@ private struct ComparisonView: View {
 
 private struct MusicBrainzTabView: View {
     let file: AudioFile
+    let scanner: LibraryScanner
 
     @AppStorage("musicBrainzContact") private var musicBrainzContact = ""
     @Environment(\.dismiss) private var dismiss
@@ -482,7 +563,7 @@ private struct MusicBrainzTabView: View {
     @ViewBuilder
     private var content: some View {
         if let selectedRecording {
-            MusicBrainzComparisonView(file: file, recording: selectedRecording)
+            MusicBrainzComparisonView(file: file, recording: selectedRecording, scanner: scanner)
         } else {
             resultsList
         }
@@ -614,30 +695,23 @@ private struct MusicBrainzResultRow: View {
 private struct MusicBrainzComparisonView: View {
     let file: AudioFile
     let recording: MusicBrainzRecording
+    let scanner: LibraryScanner
 
     /// nil until the Cover Art Archive request resolves.
     @State private var coverArtAvailable: Bool?
 
-    private var yearString: String? {
-        guard let date = recording.releaseDate else { return nil }
-        let year = date.prefix(4)
-        return (year.count == 4 && year.allSatisfy(\.isNumber)) ? String(year) : nil
-    }
+    private var yearString: String? { recording.yearString }
 
     /// MusicBrainz recordings include the track title directly — unlike
     /// Discogs, no separate tracklist match is needed to fill Title. Track
     /// Number and Genre aren't part of this search response, so they stay
-    /// unfillable here.
+    /// unfillable here. Artwork is only counted once the Cover Art Archive
+    /// request actually resolves, since it 404s for many releases.
     private var fillable: Set<MetadataField> {
-        let missing = file.missingFields
-        var result: Set<MetadataField> = []
-        if missing.contains(.title), !recording.title.isEmpty { result.insert(.title) }
-        if missing.contains(.artist), !recording.artistNames.isEmpty { result.insert(.artist) }
-        if missing.contains(.album), let releaseTitle = recording.releaseTitle, !releaseTitle.isEmpty {
-            result.insert(.album)
+        var result = recording.fillableFields(missing: file.missingFields)
+        if file.missingFields.contains(.artwork), coverArtAvailable == true {
+            result.insert(.artwork)
         }
-        if missing.contains(.year), yearString != nil { result.insert(.year) }
-        if missing.contains(.artwork), coverArtAvailable == true { result.insert(.artwork) }
         return result
     }
 
@@ -665,6 +739,18 @@ private struct MusicBrainzComparisonView: View {
                                   note: "Not in search results")
                 }
                 .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+
+                ApplyToFileSection(file: file, scanner: scanner, fillable: fillable) {
+                    var changes = TagChanges()
+                    if fillable.contains(.title) { changes.title = recording.title }
+                    if fillable.contains(.artist) { changes.artist = recording.artistNames }
+                    if fillable.contains(.album) { changes.album = recording.releaseTitle }
+                    if fillable.contains(.year) { changes.year = recording.yearString }
+                    if fillable.contains(.artwork), let url = recording.coverArtURL {
+                        changes.artworkJPEG = try await ArtworkDownloader.downloadJPEG(from: url)
+                    }
+                    return changes
+                }
 
                 actions
             }

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F4BE6132BE637D1A339EC78D /* ID3TagEditor in Frameworks */ = {isa = PBXBuildFile; productRef = A97E4077CEEBF382BCBEFBC3 /* ID3TagEditor */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		190F46FF2FFFED4400785521 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F4BE6132BE637D1A339EC78D /* ID3TagEditor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = CleanMyDigital;
 			packageProductDependencies = (
+				A97E4077CEEBF382BCBEFBC3 /* ID3TagEditor */,
 			);
 			productName = CleanMyDigital;
 			productReference = 190F46EF2FFFED4300785521 /* CleanMyDigital.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 190F46E62FFFED4300785521;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				45A1775AF4BBAE844D1DCED1 /* XCRemoteSwiftPackageReference "ID3TagEditor" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 190F46F02FFFED4300785521 /* Products */;
 			projectDirPath = "";
@@ -575,6 +584,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		45A1775AF4BBAE844D1DCED1 /* XCRemoteSwiftPackageReference "ID3TagEditor" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/chicio/ID3TagEditor";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A97E4077CEEBF382BCBEFBC3 /* ID3TagEditor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 45A1775AF4BBAE844D1DCED1 /* XCRemoteSwiftPackageReference "ID3TagEditor" */;
+			productName = ID3TagEditor;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 190F46E72FFFED4300785521 /* Project object */;
 }

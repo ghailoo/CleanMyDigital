@@ -179,14 +179,53 @@ private actor DiscogsReleaseDetailCache {
     func store(_ detail: DiscogsReleaseDetail, for id: Int) { storage[id] = detail }
 }
 
+/// Paces Discogs requests to ~1/second (well under their 60/minute limit)
+/// and backs off further whenever Discogs itself reports 429.
+private actor DiscogsRateLimiter {
+    static let shared = DiscogsRateLimiter()
+
+    private let minimumInterval: TimeInterval = 1.0
+    private let backoffInterval: TimeInterval = 5.0
+    private var nextAllowedDate: Date?
+
+    func waitIfNeeded() async {
+        if let nextAllowedDate {
+            let remaining = nextAllowedDate.timeIntervalSinceNow
+            if remaining > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            }
+        }
+        nextAllowedDate = Date().addingTimeInterval(minimumInterval)
+    }
+
+    func registerRateLimited() {
+        nextAllowedDate = Date().addingTimeInterval(backoffInterval)
+    }
+}
+
 /// A minimal client for Discogs' public `/database/search` and
 /// `/releases/{id}` endpoints.
 enum DiscogsClient {
     private static let userAgent = "CleanMyDigital/1.0 +personal use"
 
+    /// Searches with the given track title; if that comes back with zero
+    /// results, retries once with a trailing "(Mix)"-style parenthetical
+    /// stripped, since a mix/edit name Discogs doesn't recognize can shadow
+    /// an otherwise-findable release. A thrown error (bad token, rate
+    /// limit, network failure) propagates immediately without retrying.
     static func search(artist: String, track: String, token: String) async throws -> [DiscogsRelease] {
         guard !token.isEmpty else { throw DiscogsError.missingToken }
 
+        let results = try await performSearch(artist: artist, track: track, token: token)
+        if !results.isEmpty { return results }
+
+        guard let fallbackTrack = MetadataQuery.strippingTrailingParenthetical(from: track) else {
+            return results
+        }
+        return try await performSearch(artist: artist, track: fallbackTrack, token: token)
+    }
+
+    private static func performSearch(artist: String, track: String, token: String) async throws -> [DiscogsRelease] {
         var components = URLComponents(string: "https://api.discogs.com/database/search")!
         var queryItems = [
             URLQueryItem(name: "type", value: "release"),
@@ -240,6 +279,8 @@ enum DiscogsClient {
     }
 
     private static func performRequest(_ request: URLRequest) async throws -> Data {
+        await DiscogsRateLimiter.shared.waitIfNeeded()
+
         let data: Data
         let response: URLResponse
         do {
@@ -258,6 +299,7 @@ enum DiscogsClient {
         case 401:
             throw DiscogsError.unauthorized
         case 429:
+            await DiscogsRateLimiter.shared.registerRateLimited()
             throw DiscogsError.rateLimited
         default:
             throw DiscogsError.http(httpResponse.statusCode)
@@ -272,6 +314,6 @@ struct DiscogsQuery {
 
     init(for file: AudioFile) {
         artist = MetadataQuery.artist(for: file)
-        track = MetadataQuery.cleanedTrackTitle(from: file.fileName)
+        track = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
     }
 }

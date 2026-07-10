@@ -21,6 +21,27 @@ struct MusicBrainzRecording: Identifiable, Sendable {
         guard let releaseID else { return nil }
         return URL(string: "https://coverartarchive.org/release/\(releaseID)/front-250")
     }
+
+    var yearString: String? {
+        guard let releaseDate else { return nil }
+        let year = releaseDate.prefix(4)
+        return (year.count == 4 && year.allSatisfy(\.isNumber)) ? String(year) : nil
+    }
+
+    /// Which of the file's missing fields this candidate has data for,
+    /// based purely on search-result data. Excludes Artwork, which needs an
+    /// extra network round-trip against the Cover Art Archive to confirm —
+    /// callers with a way to check that should factor it in separately.
+    /// Unlike Discogs, a recording already IS a track, so Title is
+    /// fillable directly with no separate tracklist match needed.
+    func fillableFields(missing: [MetadataField]) -> Set<MetadataField> {
+        var fillable: Set<MetadataField> = []
+        if missing.contains(.title), !title.isEmpty { fillable.insert(.title) }
+        if missing.contains(.artist), !artistNames.isEmpty { fillable.insert(.artist) }
+        if missing.contains(.album), let releaseTitle, !releaseTitle.isEmpty { fillable.insert(.album) }
+        if missing.contains(.year), yearString != nil { fillable.insert(.year) }
+        return fillable
+    }
 }
 
 private struct MusicBrainzSearchResponse: Decodable {
@@ -108,11 +129,27 @@ private actor MusicBrainzRateLimiter {
 /// endpoint. No API key is required, but every request must carry a
 /// descriptive User-Agent with contact info and be rate-limited to 1/second.
 enum MusicBrainzClient {
+    /// Searches with the given recording title; if that comes back with
+    /// zero results, retries once with a trailing "(Mix)"-style
+    /// parenthetical stripped. A thrown error propagates immediately
+    /// without retrying.
     static func searchRecordings(
         artist: String, recording: String, contactEmail: String
     ) async throws -> [MusicBrainzRecording] {
         guard !contactEmail.isEmpty else { throw MusicBrainzError.missingContact }
 
+        let results = try await performSearch(artist: artist, recording: recording, contactEmail: contactEmail)
+        if !results.isEmpty { return results }
+
+        guard let fallbackRecording = MetadataQuery.strippingTrailingParenthetical(from: recording) else {
+            return results
+        }
+        return try await performSearch(artist: artist, recording: fallbackRecording, contactEmail: contactEmail)
+    }
+
+    private static func performSearch(
+        artist: String, recording: String, contactEmail: String
+    ) async throws -> [MusicBrainzRecording] {
         var queryParts: [String] = []
         if !artist.isEmpty { queryParts.append("artist:\"\(escape(artist))\"") }
         if !recording.isEmpty { queryParts.append("recording:\"\(escape(recording))\"") }
@@ -182,6 +219,6 @@ struct MusicBrainzQuery {
 
     init(for file: AudioFile) {
         artist = MetadataQuery.artist(for: file)
-        recording = MetadataQuery.cleanedTrackTitle(from: file.fileName)
+        recording = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
     }
 }
