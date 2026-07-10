@@ -28,7 +28,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var sortOrder = [KeyPathComparator(\AudioFile.fileName)]
     @State private var selection: Set<AudioFile.ID> = []
-    @State private var discogsLookupFile: AudioFile?
+    @State private var metadataLookupFile: AudioFile?
 
     private var filteredFiles: [AudioFile] {
         var result = scanner.files
@@ -73,8 +73,8 @@ struct ContentView: View {
                       document: csvDocument,
                       contentType: .commaSeparatedText,
                       defaultFilename: "CleanMyDigital Report") { _ in }
-        .sheet(item: $discogsLookupFile) { file in
-            DiscogsLookupView(file: file)
+        .sheet(item: $metadataLookupFile) { file in
+            MetadataLookupView(file: file)
         }
         .navigationTitle("CleanMyDigital")
         .navigationSubtitle(navigationSubtitleText)
@@ -181,11 +181,15 @@ struct ContentView: View {
     private var metadataColumns: some TableColumnContent<AudioFile, KeyPathComparator<AudioFile>> {
         TableColumn("Title", value: \.title.orDash)
         TableColumn("Artist", value: \.artist.orDash)
-        TableColumn("Expected Artist", value: \.expectedArtist.orDash)
+        if scanner.category != .singles {
+            TableColumn("Expected Artist", value: \.expectedArtist.orDash)
+        }
         TableColumn("Album", value: \.album.orDash)
         TableColumn("Year", value: \.year.orDash).width(50)
         TableColumn("Genre", value: \.genre.orDash)
-        TableColumn("Track", value: \.trackNumber.orDash).width(50)
+        if scanner.category != .singles {
+            TableColumn("Track", value: \.trackNumber.orDash).width(50)
+        }
     }
 
     private var table: some View {
@@ -237,8 +241,8 @@ struct ContentView: View {
             }
             if ids.count == 1, let id = ids.first,
                let file = scanner.files.first(where: { $0.id == id }) {
-                Button("Find on Discogs…") {
-                    discogsLookupFile = file
+                Button("Find Metadata…") {
+                    metadataLookupFile = file
                 }
             }
         } primaryAction: { ids in
@@ -317,28 +321,38 @@ struct ContentView: View {
     }
 
     private func csvReport() -> String {
-        let header = ["Full Path", "File Name", "Category", "Title", "Artist", "Expected Artist", "Album",
-                       "Year", "Genre", "Track Number", "Issues", "Duration", "Size"]
+        let includeSinglesOnlyFields = scanner.category != .singles
+
+        var header = ["Full Path", "File Name", "Category", "Title", "Artist"]
+        if includeSinglesOnlyFields { header.append("Expected Artist") }
+        header.append("Album")
+        header.append("Year")
+        header.append("Genre")
+        if includeSinglesOnlyFields { header.append("Track Number") }
+        header.append("Issues")
+        header.append("Duration")
+        header.append("Size")
+
         var lines = [header.map(csvField).joined(separator: ",")]
         for file in scanner.files {
             let issues = file.isReadable
                 ? file.issues.map(\.label).joined(separator: "; ")
                 : "unreadable file"
-            let row = [
+            var row = [
                 file.url.path(percentEncoded: false),
                 file.fileName,
                 file.category.rawValue,
                 file.title ?? "",
                 file.artist ?? "",
-                file.expectedArtist ?? "",
-                file.album ?? "",
-                file.year ?? "",
-                file.genre ?? "",
-                file.trackNumber ?? "",
-                issues,
-                file.formattedDuration,
-                file.formattedSize,
             ]
+            if includeSinglesOnlyFields { row.append(file.expectedArtist ?? "") }
+            row.append(file.album ?? "")
+            row.append(file.year ?? "")
+            row.append(file.genre ?? "")
+            if includeSinglesOnlyFields { row.append(file.trackNumber ?? "") }
+            row.append(issues)
+            row.append(file.formattedDuration)
+            row.append(file.formattedSize)
             lines.append(row.map(csvField).joined(separator: ","))
         }
         return lines.joined(separator: "\r\n")

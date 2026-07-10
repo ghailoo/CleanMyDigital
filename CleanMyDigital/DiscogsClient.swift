@@ -271,18 +271,7 @@ struct DiscogsQuery {
     let track: String
 
     init(for file: AudioFile) {
-        artist = file.expectedArtist ?? file.artist ?? ""
-        track = Self.trackQuery(from: file.fileName)
-    }
-
-    /// Strips a leading track number ("01 - ", "3.", "07_", "12)") and turns
-    /// remaining underscores into spaces before searching.
-    private static func trackQuery(from fileName: String) -> String {
-        var name = (fileName as NSString).deletingPathExtension
-        if let range = name.range(of: #"^\s*\d{1,3}[\s._\-)]+"#, options: .regularExpression) {
-            name.removeSubrange(range)
-        }
-        name = name.replacingOccurrences(of: "_", with: " ")
-        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+        artist = MetadataQuery.artist(for: file)
+        track = MetadataQuery.cleanedTrackTitle(from: file.fileName)
     }
 }

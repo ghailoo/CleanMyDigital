@@ -27,8 +27,9 @@ enum LibraryCategory: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Singles & Albums are organized as ArtistName/… — Compilations aren't.
-    var checksArtistFolder: Bool { self != .compilations }
+    /// Only Albums are checked against their containing ArtistName/ folder —
+    /// Singles don't require it, and Compilations aren't organized by artist.
+    var checksArtistFolder: Bool { self == .albums }
 }
 
 /// A single flagged problem on a scanned file: either a missing tag or an
@@ -88,7 +89,7 @@ struct AudioFile: Identifiable, Sendable {
     }
 
     /// True when the Artist tag is present but doesn't match the folder
-    /// it's filed under. Only checked for Singles & Albums.
+    /// it's filed under. Only checked for Albums.
     var hasArtistMismatch: Bool {
         guard category.checksArtistFolder,
               let expectedArtist, let artist, !artist.isEmpty

@@ -1,12 +1,53 @@
 //
-//  DiscogsLookupView.swift
+//  MetadataLookupView.swift
 //  CleanMyDigital
 //
 
 import AppKit
 import SwiftUI
 
-struct DiscogsLookupView: View {
+struct MetadataLookupView: View {
+    let file: AudioFile
+
+    enum Provider: String, CaseIterable, Identifiable {
+        case discogs = "Discogs"
+        case musicBrainz = "MusicBrainz"
+
+        var id: String { rawValue }
+    }
+
+    @State private var provider: Provider = .discogs
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Provider", selection: $provider) {
+                ForEach(Provider.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding()
+
+            Divider()
+
+            content
+        }
+        .frame(minWidth: 480, minHeight: 460)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch provider {
+        case .discogs:
+            DiscogsTabView(file: file)
+        case .musicBrainz:
+            MusicBrainzTabView(file: file)
+        }
+    }
+}
+
+// MARK: - Discogs
+
+private struct DiscogsTabView: View {
     let file: AudioFile
 
     @AppStorage("discogsToken") private var discogsToken = ""
@@ -26,7 +67,6 @@ struct DiscogsLookupView: View {
             Divider()
             content
         }
-        .frame(minWidth: 480, minHeight: 420)
         .task(id: file.id) {
             await search()
         }
@@ -385,6 +425,355 @@ private struct ComparisonView: View {
             lines.append("Track Number: \(matchedTrack.position)")
         }
         if let url = release.releasePageURL { lines.append(url.absoluteString) }
+        if !fillable.isEmpty {
+            lines.append("Would fill: " + fillable.map(\.rawValue).sorted().joined(separator: ", "))
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+    }
+}
+
+// MARK: - MusicBrainz
+
+private struct MusicBrainzTabView: View {
+    let file: AudioFile
+
+    @AppStorage("musicBrainzContact") private var musicBrainzContact = ""
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openSettings) private var openSettings
+
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var results: [MusicBrainzRecording] = []
+    @State private var selectedRecording: MusicBrainzRecording?
+
+    private var query: MusicBrainzQuery { MusicBrainzQuery(for: file) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            content
+        }
+        .task(id: file.id) {
+            await search()
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(selectedRecording == nil ? "Find on MusicBrainz" : "Compare with MusicBrainz")
+                    .font(.headline)
+                Text(file.fileName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if selectedRecording != nil {
+                Button("Back to Results") { selectedRecording = nil }
+            }
+            Button("Done") { dismiss() }
+        }
+        .padding()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let selectedRecording {
+            MusicBrainzComparisonView(file: file, recording: selectedRecording)
+        } else {
+            resultsList
+        }
+    }
+
+    @ViewBuilder
+    private var resultsList: some View {
+        if musicBrainzContact.isEmpty {
+            ContentUnavailableView {
+                Label("No Contact Email", systemImage: "envelope.badge")
+            } description: {
+                Text("Set your contact email in Settings — MusicBrainz requires one in the User-Agent header.")
+            } actions: {
+                Button("Open Settings…") { openSettings() }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if isLoading {
+            ProgressView("Searching MusicBrainz…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let errorMessage {
+            ContentUnavailableView {
+                Label("Search Failed", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(errorMessage)
+            } actions: {
+                Button("Try Again") { Task { await search() } }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if results.isEmpty {
+            ContentUnavailableView.search
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(results) { recording in
+                Button {
+                    selectedRecording = recording
+                } label: {
+                    MusicBrainzResultRow(recording: recording)
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.inset)
+        }
+    }
+
+    private func search() async {
+        guard !musicBrainzContact.isEmpty else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            results = try await MusicBrainzClient.searchRecordings(
+                artist: query.artist, recording: query.recording, contactEmail: musicBrainzContact)
+        } catch {
+            errorMessage = error.localizedDescription
+            results = []
+        }
+    }
+}
+
+/// A thumbnail from the Cover Art Archive — it 404s for many releases, so
+/// failures fall back to a plain gray placeholder instead of spinning forever.
+private struct CoverArtThumbnail: View {
+    let url: URL?
+    var size: CGFloat = 44
+    var onLoadResult: ((Bool) -> Void)?
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                            .onAppear { onLoadResult?(true) }
+                    case .failure:
+                        placeholder
+                            .onAppear { onLoadResult?(false) }
+                    case .empty:
+                        ProgressView()
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+                    .onAppear { onLoadResult?(false) }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private var placeholder: some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.2))
+            .overlay {
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+                    .font(.caption2)
+            }
+    }
+}
+
+private struct MusicBrainzResultRow: View {
+    let recording: MusicBrainzRecording
+
+    var body: some View {
+        HStack(spacing: 10) {
+            CoverArtThumbnail(url: recording.coverArtURL, size: 44)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recording.title).font(.body).lineLimit(1)
+                HStack(spacing: 6) {
+                    if !recording.artistNames.isEmpty { Text(recording.artistNames) }
+                    if let releaseTitle = recording.releaseTitle { Text(releaseTitle) }
+                    if let date = recording.releaseDate { Text(date) }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct MusicBrainzComparisonView: View {
+    let file: AudioFile
+    let recording: MusicBrainzRecording
+
+    /// nil until the Cover Art Archive request resolves.
+    @State private var coverArtAvailable: Bool?
+
+    private var yearString: String? {
+        guard let date = recording.releaseDate else { return nil }
+        let year = date.prefix(4)
+        return (year.count == 4 && year.allSatisfy(\.isNumber)) ? String(year) : nil
+    }
+
+    /// MusicBrainz recordings include the track title directly — unlike
+    /// Discogs, no separate tracklist match is needed to fill Title. Track
+    /// Number and Genre aren't part of this search response, so they stay
+    /// unfillable here.
+    private var fillable: Set<MetadataField> {
+        let missing = file.missingFields
+        var result: Set<MetadataField> = []
+        if missing.contains(.title), !recording.title.isEmpty { result.insert(.title) }
+        if missing.contains(.artist), !recording.artistNames.isEmpty { result.insert(.artist) }
+        if missing.contains(.album), let releaseTitle = recording.releaseTitle, !releaseTitle.isEmpty {
+            result.insert(.album)
+        }
+        if missing.contains(.year), yearString != nil { result.insert(.year) }
+        if missing.contains(.artwork), coverArtAvailable == true { result.insert(.artwork) }
+        return result
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                headerSection
+
+                VStack(spacing: 0) {
+                    comparisonRow(field: .title, current: file.title,
+                                  found: recording.title.isEmpty ? nil : recording.title)
+                    Divider()
+                    comparisonRow(field: .artist, current: file.artist,
+                                  found: recording.artistNames.isEmpty ? nil : recording.artistNames)
+                    Divider()
+                    comparisonRow(field: .album, current: file.album, found: recording.releaseTitle)
+                    Divider()
+                    comparisonRow(field: .year, current: file.year, found: yearString)
+                    Divider()
+                    comparisonRow(field: .genre, current: file.genre, found: nil, note: "Not in search results")
+                    Divider()
+                    artworkComparisonRow
+                    Divider()
+                    comparisonRow(field: .trackNumber, current: file.trackNumber, found: nil,
+                                  note: "Not in search results")
+                }
+                .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+
+                actions
+            }
+            .padding()
+        }
+    }
+
+    private var headerSection: some View {
+        HStack(spacing: 12) {
+            CoverArtThumbnail(url: recording.coverArtURL, size: 64)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recording.title).font(.headline)
+                if let releaseTitle = recording.releaseTitle {
+                    Text(releaseTitle).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    private var actions: some View {
+        HStack {
+            Button("Copy as Text") { copyAsText() }
+            if let url = URL(string: "https://musicbrainz.org/recording/\(recording.id)") {
+                Link("Open on MusicBrainz.org", destination: url)
+            }
+            Spacer()
+        }
+    }
+
+    private func comparisonRow(field: MetadataField, current: String?, found: String?, note: String? = nil) -> some View {
+        HStack(alignment: .top) {
+            Text(field.rawValue)
+                .font(.subheadline.weight(.medium))
+                .frame(width: 100, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(current?.isEmpty == false ? current! : "–")
+                    .foregroundStyle(.secondary)
+                Text("Current").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(found ?? note ?? "–")
+                    .foregroundStyle(found == nil ? .tertiary : .primary)
+                Text("MusicBrainz").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if fillable.contains(field) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .help("This would fill a flagged field")
+            } else {
+                Color.clear.frame(width: 16, height: 16)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private var artworkComparisonRow: some View {
+        HStack(alignment: .top) {
+            Text(MetadataField.artwork.rawValue)
+                .font(.subheadline.weight(.medium))
+                .frame(width: 100, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                if let thumbnail = file.artworkThumbnail {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Text("–").foregroundStyle(.secondary)
+                }
+                Text("Current").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                if recording.coverArtURL != nil {
+                    CoverArtThumbnail(url: recording.coverArtURL, size: 40) { available in
+                        coverArtAvailable = available
+                    }
+                } else {
+                    Text("–").foregroundStyle(.tertiary)
+                }
+                Text("MusicBrainz").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if fillable.contains(.artwork) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .help("This would fill a flagged field")
+            } else {
+                Color.clear.frame(width: 16, height: 16)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private func copyAsText() {
+        var lines = ["MusicBrainz match for \(file.fileName)", recording.title]
+        if !recording.artistNames.isEmpty { lines.append("Artist: \(recording.artistNames)") }
+        if let releaseTitle = recording.releaseTitle { lines.append("Album: \(releaseTitle)") }
+        if let yearString { lines.append("Year: \(yearString)") }
+        if let url = URL(string: "https://musicbrainz.org/recording/\(recording.id)") {
+            lines.append(url.absoluteString)
+        }
         if !fillable.isEmpty {
             lines.append("Would fill: " + fillable.map(\.rawValue).sorted().joined(separator: ", "))
         }
