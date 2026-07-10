@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3DEA20C4CACFFDDC526FD0F9 /* ID3TagEditor in Frameworks */ = {isa = PBXBuildFile; productRef = A97E4077CEEBF382BCBEFBC3 /* ID3TagEditor */; };
 		F4BE6132BE637D1A339EC78D /* ID3TagEditor in Frameworks */ = {isa = PBXBuildFile; productRef = A97E4077CEEBF382BCBEFBC3 /* ID3TagEditor */; };
 /* End PBXBuildFile section */
 
@@ -64,6 +65,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3DEA20C4CACFFDDC526FD0F9 /* ID3TagEditor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -141,6 +143,7 @@
 			);
 			name = CleanMyDigitalTests;
 			packageProductDependencies = (
+				A97E4077CEEBF382BCBEFBC3 /* ID3TagEditor */,
 			);
 			productName = CleanMyDigitalTests;
 			productReference = 190F46FE2FFFED4400785521 /* CleanMyDigitalTests.xctest */;

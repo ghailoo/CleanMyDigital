@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// Metadata read natively from a FLAC's VORBIS_COMMENT and PICTURE blocks.
+/// Reads a FLAC's VORBIS_COMMENT and PICTURE blocks natively.
 ///
 /// AVFoundation can't see any of this for FLACs with a nonstandard ID3v2
 /// prefix — confirmed empirically: it reports the file's only available
@@ -14,18 +14,8 @@ import Foundation
 /// file as ID3-only and never looks past the wrapper at the FLAC-native
 /// blocks. This reader exists so scanning (and post-write re-inspection)
 /// stays accurate for those files instead of leaving them flagged forever.
-struct FLACNativeMetadata {
-    var title: String?
-    var artist: String?
-    var album: String?
-    var year: String?
-    var genre: String?
-    var trackNumber: String?
-    var artworkData: Data?
-}
-
 enum FLACMetadataReader {
-    static func read(contentsOf url: URL) throws -> FLACNativeMetadata {
+    static func read(contentsOf url: URL) throws -> NativeAudioMetadata {
         let bytes = [UInt8](try Data(contentsOf: url))
         let streamStart = try FLACStream.streamStart(in: bytes)
         let (blocks, _) = try FLACStream.parseBlocks(in: bytes, streamStart: streamStart)
@@ -43,7 +33,7 @@ enum FLACMetadataReader {
             }
         }
 
-        var metadata = FLACNativeMetadata()
+        var metadata = NativeAudioMetadata()
         if let vorbisComment {
             let (_, comments) = FLACStream.parseVorbisComment(vorbisComment)
             func value(for field: String) -> String? {

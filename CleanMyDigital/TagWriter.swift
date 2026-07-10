@@ -73,9 +73,9 @@ enum TagWriteHelpers {
 
 /// Dispatches tag writes to the per-format writer, if any.
 enum TagWriterRouter {
-    /// FLAC, MP3, and M4A are the only formats CleanMyDigital can write to
-    /// today. WAV/AIFF and everything else stay read-only.
-    private static let writableExtensions: Set<String> = ["flac", "mp3", "m4a"]
+    /// FLAC, MP3, M4A, and WAV are the formats CleanMyDigital can write to
+    /// today. AIFF and everything else stay read-only.
+    private static let writableExtensions: Set<String> = ["flac", "mp3", "m4a", "wav", "wave"]
 
     nonisolated static func canWrite(fileExtension: String) -> Bool {
         writableExtensions.contains(fileExtension.lowercased())
@@ -90,6 +90,8 @@ enum TagWriterRouter {
             try MP3TagWriter.write(changes, to: url)
         case "m4a":
             try await M4ATagWriter.write(changes, to: url)
+        case "wav", "wave":
+            try WAVTagWriter.write(changes, to: url)
         default:
             throw TagWriteError.unsupportedFormat(url.pathExtension)
         }

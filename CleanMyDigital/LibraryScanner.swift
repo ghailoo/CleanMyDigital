@@ -266,13 +266,20 @@ final class LibraryScanner {
 
             let duration = try? await asset.load(.duration).seconds
 
-            // AVFoundation can't see anything for FLACs with a nonstandard
-            // ID3v2 prefix — it treats the whole file as ID3-only and never
-            // looks past the wrapper at the FLAC-native VORBIS_COMMENT/
-            // PICTURE blocks. Read those natively and fall back to them
-            // wherever AVFoundation came up empty, so scanning (and
-            // post-write re-inspection) stays accurate for those files.
-            let native = ext == "flac" ? try? FLACMetadataReader.read(contentsOf: url) : nil
+            // AVFoundation's reading is incomplete/unreliable for some
+            // container formats — it can't see anything for FLACs with a
+            // nonstandard ID3v2 prefix (treats the whole file as ID3-only),
+            // and for WAV it translates LIST/INFO fields into an
+            // undocumented identifier namespace scanning doesn't look for.
+            // Read those natively and fall back to them wherever
+            // AVFoundation came up empty, so scanning (and post-write
+            // re-inspection) stays accurate for those files.
+            let native: NativeAudioMetadata?
+            switch ext {
+            case "flac": native = try? FLACMetadataReader.read(contentsOf: url)
+            case "wav", "wave": native = try? RIFFMetadataReader.read(contentsOf: url)
+            default: native = nil
+            }
 
             var artwork = await artworkThumbnail(in: items)
             if artwork == nil, let artworkData = native?.artworkData {
@@ -319,8 +326,8 @@ final class LibraryScanner {
         }
     }
 
-    /// AVFoundation's reading wins when it found something — the native
-    /// FLAC reader only fills in what AVFoundation couldn't see at all.
+    /// AVFoundation's reading wins when it found something — a native
+    /// reader only fills in what AVFoundation couldn't see at all.
     nonisolated private static func mergedValue(avFoundation: String?, native: String?) -> String? {
         if let avFoundation, !avFoundation.isEmpty { return avFoundation }
         if let native, !native.isEmpty { return native }
