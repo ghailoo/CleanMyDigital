@@ -145,6 +145,26 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func artworkThumbnailView(for file: AudioFile) -> some View {
+        if let thumbnail = file.artworkThumbnail {
+            Image(nsImage: thumbnail)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+        } else {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.gray.opacity(0.2))
+                .frame(width: 24, height: 24)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+        }
+    }
+
     @TableColumnBuilder<AudioFile, KeyPathComparator<AudioFile>>
     private var metadataColumns: some TableColumnContent<AudioFile, KeyPathComparator<AudioFile>> {
         TableColumn("Title", value: \.title.orDash)
@@ -157,6 +177,11 @@ struct ContentView: View {
 
     private var table: some View {
         Table(filteredFiles, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Artwork") { file in
+                artworkThumbnailView(for: file)
+            }
+            .width(32)
+
             TableColumn("") { file in
                 Image(systemName: statusSymbol(for: file))
                     .foregroundStyle(statusColor(for: file))

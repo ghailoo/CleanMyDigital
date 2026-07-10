@@ -3,6 +3,7 @@
 //  CleanMyDigital
 //
 
+import AppKit
 import Foundation
 
 /// A metadata field the scanner checks on every audio file.
@@ -29,7 +30,8 @@ struct AudioFile: Identifiable, Sendable {
     let title: String?
     let artist: String?
     let album: String?
-    let hasArtwork: Bool
+    /// A small, pre-downscaled thumbnail of the embedded cover art, if any.
+    let artworkThumbnail: NSImage?
     let year: String?
     let genre: String?
     let trackNumber: String?
@@ -38,6 +40,8 @@ struct AudioFile: Identifiable, Sendable {
     let isReadable: Bool
 
     var id: URL { url }
+
+    var hasArtwork: Bool { artworkThumbnail != nil }
 
     var missingFields: [MetadataField] {
         guard isReadable else { return MetadataField.allCases }

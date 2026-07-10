@@ -3,8 +3,10 @@
 //  CleanMyDigital
 //
 
+import AppKit
 import Foundation
 import AVFoundation
+import ImageIO
 import Observation
 
 @Observable
@@ -110,7 +112,7 @@ final class LibraryScanner {
             AudioFile(url: url, fileName: url.lastPathComponent, fileExtension: ext,
                       sizeBytes: size, duration: nil,
                       title: nil, artist: nil, album: nil,
-                      hasArtwork: false,
+                      artworkThumbnail: nil,
                       year: nil, genre: nil, trackNumber: nil,
                       isReadable: false)
         }
@@ -140,7 +142,7 @@ final class LibraryScanner {
                                           keys: ["TPE1", "TP1", "©ART", "artist", "ARTIST"]),
                 album: await stringValue(in: items, common: .commonIdentifierAlbumName,
                                          keys: ["TALB", "TAL", "©alb", "album", "ALBUM"]),
-                hasArtwork: await artworkPresent(in: items),
+                artworkThumbnail: await artworkThumbnail(in: items),
                 year: await stringValue(in: items, common: .commonIdentifierCreationDate,
                                         keys: ["TYER", "TDRC", "©day", "year", "YEAR"]),
                 genre: await stringValue(in: items, common: nil,
@@ -175,7 +177,11 @@ final class LibraryScanner {
         return nil
     }
 
-    nonisolated private static func artworkPresent(in items: [AVMetadataItem]) async -> Bool {
+    /// Table thumbnails render at 24pt; 64px covers up to 3x Retina scaling
+    /// while keeping the decoded bitmap tiny across large libraries.
+    nonisolated private static let thumbnailMaxPixelSize = 64
+
+    nonisolated private static func artworkThumbnail(in items: [AVMetadataItem]) async -> NSImage? {
         var candidates = AVMetadataItem.metadataItems(
             from: items, filteredByIdentifier: .commonIdentifierArtwork)
         candidates += items.filter { item in
@@ -183,10 +189,24 @@ final class LibraryScanner {
             return ["APIC", "PIC", "covr"].contains(String(describing: key))
         }
         for item in candidates {
-            if let data = try? await item.load(.dataValue), !data.isEmpty {
-                return true
+            if let data = try? await item.load(.dataValue), !data.isEmpty,
+               let thumbnail = downscaledImage(from: data, maxPixelSize: thumbnailMaxPixelSize) {
+                return thumbnail
             }
         }
-        return false
+        return nil
+    }
+
+    nonisolated private static func downscaledImage(from data: Data, maxPixelSize: Int) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }
