@@ -296,7 +296,7 @@ struct ContentView: View {
         switch scanner.spectralResults[file.url] {
         case .measured(let hz):
             let isLow = hz < Self.suspiciousCutoffThresholdHz
-            qualityBadge(String(format: "%.1f kHz", hz / 1000), color: isLow ? .orange : .green,
+            qualityBadge(String(format: "%.1f kHz", hz / 1000), color: isLow ? .qualityWarning : .qualityGood,
                          tooltip: isLow
                             ? "Frequencies above ~\(Int(hz / 1000))kHz are missing — likely re-encoded from a lower-bitrate source"
                             : "Full-range audio up to ~\(Int(hz / 1000))kHz")
@@ -423,16 +423,19 @@ struct ContentView: View {
     /// lossy audio reads as low quality.
     private func bitrateColor(for file: AudioFile) -> Color {
         guard let kbps = file.bitrateKbps else { return .secondary }
-        if kbps >= 256 { return .green }
-        if kbps >= 128 { return .orange }
-        return .red
+        if kbps >= 256 { return .qualityGood }
+        if kbps >= 128 { return .qualityWarning }
+        return .qualityBad
     }
 
     /// A small colored pill — same treatment as the "Found"/"No match"
     /// lookup badges — for a quality reading that's actually available.
+    /// Text uses a deepened shade of `color` rather than the base hue: a
+    /// plain system color on its own light tint (e.g. `.green` text on
+    /// `.green.opacity(0.15)`) doesn't have enough contrast to read well.
     private func qualityBadge(_ text: String, color: Color, tooltip: String) -> some View {
         Text(text)
-            .font(.caption2.weight(.medium))
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -610,6 +613,15 @@ private struct CSVDocument: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: Data(text.utf8))
     }
+}
+
+/// Deepened shades for badge text — legible on their own 15%-opacity tint,
+/// unlike the flat system colors (`.green` text on `.green.opacity(0.15)`
+/// reads as washed-out and low-contrast).
+private extension Color {
+    static let qualityGood = Color(red: 0.11, green: 0.50, blue: 0.18)
+    static let qualityWarning = Color(red: 0.68, green: 0.40, blue: 0.02)
+    static let qualityBad = Color(red: 0.68, green: 0.14, blue: 0.14)
 }
 
 private extension Optional where Wrapped == String {
