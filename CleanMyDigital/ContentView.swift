@@ -20,7 +20,9 @@ struct ContentView: View {
         var id: String { rawValue }
     }
 
-    @State private var scanner = LibraryScanner()
+    let scanner: LibraryScanner
+
+    @Environment(\.openWindow) private var openWindow
     @State private var showFolderPicker = false
     @State private var showCSVExporter = false
     @State private var csvDocument = CSVDocument(text: "")
@@ -32,7 +34,6 @@ struct ContentView: View {
     @State private var selection: Set<AudioFile.ID> = []
     @State private var metadataLookupFile: AudioFile?
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
-    @State private var showRenameSheet = false
     @AppStorage("discogsToken") private var discogsToken = ""
     @AppStorage("musicBrainzContact") private var musicBrainzContact = ""
 
@@ -82,9 +83,6 @@ struct ContentView: View {
                       defaultFilename: "CleanMyDigital Report") { _ in }
         .sheet(item: $metadataLookupFile) { file in
             MetadataLookupView(file: file, scanner: scanner, initialProvider: metadataLookupInitialProvider)
-        }
-        .sheet(isPresented: $showRenameSheet) {
-            RenameSheetView(scanner: scanner)
         }
         .sheet(isPresented: $showCategoryPrompt) {
             categoryPromptSheet
@@ -429,7 +427,7 @@ struct ContentView: View {
         }
         ToolbarItem {
             Button("Rename Files…", systemImage: "textformat") {
-                showRenameSheet = true
+                openWindow(id: "rename-files")
             }
             .disabled(scanner.files.isEmpty)
             .help("Rename files to \"Artist - Title\" using their tags")
@@ -569,5 +567,5 @@ private struct CategoryPromptOption: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(scanner: LibraryScanner())
 }

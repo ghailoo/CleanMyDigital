@@ -8,7 +8,7 @@ import SwiftUI
 struct RenameSheetView: View {
     let scanner: LibraryScanner
 
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismissWindow) private var dismissWindow
 
     @State private var proposals: [RenameProposal] = []
     @State private var selection: Set<URL> = []
@@ -24,7 +24,8 @@ struct RenameSheetView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 640, minHeight: 440)
+        .frame(minWidth: 640, idealWidth: 760, maxWidth: .infinity,
+               minHeight: 440, idealHeight: 520, maxHeight: .infinity)
         .onAppear { rebuildPlan() }
     }
 
@@ -37,7 +38,7 @@ struct RenameSheetView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Done") { dismiss() }
+            Button("Done") { dismissWindow(id: "rename-files") }
         }
         .padding()
     }
