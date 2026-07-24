@@ -380,7 +380,9 @@ struct ContentView: View {
             .width(72)
 
             TableColumn("Bitrate", value: \.bitrateSortKey) { file in
-                Text(file.formattedBitrate).help("Real encoded bitrate, read from the audio stream itself")
+                Text(file.formattedBitrate)
+                    .foregroundStyle(bitrateColor(for: file))
+                    .help("Real encoded bitrate, read from the audio stream itself")
             }
             .width(70)
             TableColumn("Cutoff") { file in
@@ -418,6 +420,17 @@ struct ContentView: View {
         if file.hasNoMetadata { return .red }
         if file.hasIssues { return .orange }
         return .green
+    }
+
+    /// Rough quality tiers for the real computed bitrate — 256kbps+ (and
+    /// every lossless file, which naturally lands far above that) reads as
+    /// high quality; below the ~128kbps historical "acceptable" floor for
+    /// lossy audio reads as low quality.
+    private func bitrateColor(for file: AudioFile) -> Color {
+        guard let kbps = file.bitrateKbps else { return .secondary }
+        if kbps >= 256 { return .green }
+        if kbps >= 128 { return .orange }
+        return .red
     }
 
     // MARK: - Toolbar
