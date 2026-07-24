@@ -107,43 +107,46 @@ struct ContentView: View {
     /// scan rules and different Discogs/MusicBrainz search behavior, so
     /// silently defaulting to one was easy to miss.
     private var categoryPromptSheet: some View {
-        VStack(spacing: 20) {
-            Text("What are you scanning?")
-                .font(.title2.weight(.semibold))
-            Text("Singles, Albums, and Compilations are checked against different rules and searched differently on Discogs and MusicBrainz.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
-
+        VStack(spacing: 28) {
             VStack(spacing: 10) {
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.secondary)
+                Text("What are you scanning?")
+                    .font(.title2.weight(.semibold))
+                Text("Singles, Albums, and Compilations are checked against different rules and searched differently on Discogs and MusicBrainz.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 340)
+            }
+
+            VStack(spacing: 8) {
                 ForEach(LibraryCategory.allCases) { category in
-                    Button {
+                    CategoryPromptOption(
+                        title: category.rawValue,
+                        systemImage: categoryPromptIcon(category),
+                        description: categoryPromptDescription(category)
+                    ) {
                         selectedCategory = category
                         showCategoryPrompt = false
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(category.rawValue).font(.headline)
-                            Text(categoryPromptDescription(category))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(nil)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
                 }
             }
-            .frame(maxWidth: 360)
+            .frame(maxWidth: 380)
         }
-        .padding(32)
-        .frame(minWidth: 420, minHeight: 340)
+        .padding(36)
+        .frame(minWidth: 440, minHeight: 400)
         .interactiveDismissDisabled()
+    }
+
+    private func categoryPromptIcon(_ category: LibraryCategory) -> String {
+        switch category {
+        case .singles: "music.note"
+        case .albums: "opticaldisc"
+        case .compilations: "rectangle.stack"
+        }
     }
 
     private func categoryPromptDescription(_ category: LibraryCategory) -> String {
@@ -520,6 +523,49 @@ private struct CSVDocument: FileDocument {
 
 private extension Optional where Wrapped == String {
     var orDash: String { self?.isEmpty == false ? self! : "–" }
+}
+
+/// One row in the launch category prompt — icon, title, description, and a
+/// chevron, with a hover highlight so it reads as a selectable card rather
+/// than a plain button.
+private struct CategoryPromptOption: View {
+    let title: String
+    let systemImage: String
+    let description: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(isHovering ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
 }
 
 #Preview {
