@@ -369,7 +369,7 @@ final class LibraryScanner {
     /// with bounded concurrency like the initial scan, since this is
     /// CPU-bound decode+FFT work rather than a rate-limited network call.
     func analyzeSpectrum() {
-        guard !isAnalyzingSpectrum else { return }
+        guard !isAnalyzingSpectrum, let scannedFolder else { return }
         let targets = files.filter(\.isReadable)
         guard !targets.isEmpty else { return }
 
@@ -378,6 +378,14 @@ final class LibraryScanner {
         isAnalyzingSpectrum = true
 
         spectralTask = Task {
+            // Held for the whole batch, unlike the synchronous file-write
+            // methods' `defer` — this Task outlives the function that
+            // launched it, so access has to be released only once every
+            // file has actually been read, not when `analyzeSpectrum()`
+            // itself returns (immediately, after just starting the Task).
+            let didAccess = scannedFolder.startAccessingSecurityScopedResource()
+            defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+
             let maxConcurrent = 4
             await withTaskGroup(of: (URL, SpectralCutoffOutcome).self) { group in
                 var iterator = targets.makeIterator()
