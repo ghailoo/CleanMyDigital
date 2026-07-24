@@ -296,18 +296,10 @@ struct ContentView: View {
         switch scanner.spectralResults[file.url] {
         case .measured(let hz):
             let isLow = hz < Self.suspiciousCutoffThresholdHz
-            HStack(spacing: 3) {
-                if isLow {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-                Text(String(format: "%.1f kHz", hz / 1000))
-                    .foregroundStyle(isLow ? .orange : .primary)
-            }
-            .help(isLow
-                  ? "Frequencies above ~\(Int(hz / 1000))kHz are missing — likely re-encoded from a lower-bitrate source"
-                  : "Full-range audio up to ~\(Int(hz / 1000))kHz")
+            qualityBadge(String(format: "%.1f kHz", hz / 1000), color: isLow ? .orange : .green,
+                         tooltip: isLow
+                            ? "Frequencies above ~\(Int(hz / 1000))kHz are missing — likely re-encoded from a lower-bitrate source"
+                            : "Full-range audio up to ~\(Int(hz / 1000))kHz")
         case .inconclusive:
             Text("–").foregroundStyle(.tertiary).help("Too short or quiet to measure")
         case .failed(let message):
@@ -380,15 +372,18 @@ struct ContentView: View {
             .width(72)
 
             TableColumn("Bitrate", value: \.bitrateSortKey) { file in
-                Text(file.formattedBitrate)
-                    .foregroundStyle(bitrateColor(for: file))
-                    .help("Real encoded bitrate, read from the audio stream itself")
+                if let kbps = file.bitrateKbps {
+                    qualityBadge("\(kbps.formatted()) kbps", color: bitrateColor(for: file),
+                                 tooltip: "Real encoded bitrate, read from the audio stream itself")
+                } else {
+                    Text("–").foregroundStyle(.tertiary)
+                }
             }
-            .width(70)
+            .width(82)
             TableColumn("Cutoff") { file in
                 spectralCutoffCell(for: file)
             }
-            .width(70)
+            .width(82)
             TableColumn("Length", value: \.formattedDuration).width(60)
             TableColumn("Size", value: \.formattedSize).width(80)
         }
@@ -431,6 +426,18 @@ struct ContentView: View {
         if kbps >= 256 { return .green }
         if kbps >= 128 { return .orange }
         return .red
+    }
+
+    /// A small colored pill — same treatment as the "Found"/"No match"
+    /// lookup badges — for a quality reading that's actually available.
+    private func qualityBadge(_ text: String, color: Color, tooltip: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15), in: Capsule())
+            .help(tooltip)
     }
 
     // MARK: - Toolbar
