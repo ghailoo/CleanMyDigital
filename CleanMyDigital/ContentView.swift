@@ -432,6 +432,13 @@ struct ContentView: View {
             .disabled(scanner.files.isEmpty)
             .help("Rename files to \"Artist - Title\" using their tags")
         }
+        ToolbarItem {
+            Button("Collect into Folders…", systemImage: "folder.badge.plus") {
+                openWindow(id: "collect-into-folders")
+            }
+            .disabled(scanner.files.isEmpty)
+            .help("Group each Singles track's mixes into a subfolder named after the release")
+        }
     }
 
     private var canFindAllMetadata: Bool {

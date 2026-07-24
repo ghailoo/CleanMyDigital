@@ -134,8 +134,10 @@ enum RenamePlanner {
     }
 
     /// Replaces path-hostile characters, collapses whitespace, and trims —
-    /// safe to use directly as a macOS filename component.
-    private static func sanitized(_ value: String?) -> String? {
+    /// safe to use directly as a macOS filename component. Shared with
+    /// `CollectionPlanner`, which needs the same sanitization for release
+    /// folder names.
+    static func sanitized(_ value: String?) -> String? {
         guard let value else { return nil }
         var result = value.replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")

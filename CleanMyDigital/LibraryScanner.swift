@@ -50,10 +50,12 @@ final class LibraryScanner {
 
     private var lookupTask: Task<Void, Never>?
 
-    /// The most recent batch of renames, oldest first — session-only,
-    /// cleared on a new scan. Powers "Undo Last Rename".
+    /// The most recent batch of file moves, oldest first — renames and
+    /// "Collect into Folders" moves share this same slot, since both are
+    /// just `FileManager.moveItem` under the hood. Session-only, cleared on
+    /// a new scan. Powers "Undo Last Change".
     private var lastRenameBatch: [RenameLogEntry] = []
-    var canUndoLastRename: Bool { !lastRenameBatch.isEmpty }
+    var canUndoLastFileOperation: Bool { !lastRenameBatch.isEmpty }
 
     /// File extensions AVFoundation can read metadata from.
     nonisolated static let supportedExtensions: Set<String> = [
@@ -206,9 +208,61 @@ final class LibraryScanner {
         return results
     }
 
-    /// Reverses the most recent rename batch, most-recent-first so any
-    /// collision-avoidance ordering unwinds correctly.
-    func undoLastRename() async -> [RenameOperationResult] {
+    /// Moves each proposal's file into its release subfolder (created if
+    /// needed) via `FileManager.moveItem`, same access/error-handling
+    /// pattern as `renameFiles` — and shares its undo batch, since both are
+    /// just moves from one URL to another.
+    func collectIntoFolders(_ proposals: [CollectionProposal]) async -> [RenameOperationResult] {
+        guard let scannedFolder else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
+                                       proposedName: $0.proposedRelativePath,
+                                       errorDescription: "No scanned folder to organize within.")
+            }
+        }
+
+        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
+        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+
+        var results: [RenameOperationResult] = []
+        var batch: [RenameLogEntry] = []
+
+        for proposal in proposals {
+            let oldURL = proposal.file.url
+            let destinationFolder = oldURL.deletingLastPathComponent()
+                .appendingPathComponent(proposal.releaseFolderName)
+            let newURL = destinationFolder.appendingPathComponent(oldURL.lastPathComponent)
+
+            do {
+                try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
+                try performMove(from: oldURL, to: newURL)
+                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL))
+                if let index = files.firstIndex(where: { $0.url == oldURL }) {
+                    files[index] = files[index].renamed(to: newURL)
+                }
+                if let outcome = lookupResults.removeValue(forKey: oldURL) {
+                    lookupResults[newURL] = outcome
+                }
+                results.append(RenameOperationResult(
+                    originalURL: oldURL, currentName: proposal.file.fileName,
+                    proposedName: proposal.proposedRelativePath, errorDescription: nil))
+            } catch {
+                results.append(RenameOperationResult(
+                    originalURL: oldURL, currentName: proposal.file.fileName,
+                    proposedName: proposal.proposedRelativePath, errorDescription: error.localizedDescription))
+            }
+        }
+
+        if !batch.isEmpty {
+            lastRenameBatch = batch
+        }
+        return results
+    }
+
+    /// Reverses the most recent move batch (a rename or a "Collect into
+    /// Folders" run), most-recent-first so any collision-avoidance
+    /// ordering unwinds correctly.
+    func undoLastFileOperation() async -> [RenameOperationResult] {
         guard let scannedFolder, !lastRenameBatch.isEmpty else { return [] }
 
         let didAccess = scannedFolder.startAccessingSecurityScopedResource()

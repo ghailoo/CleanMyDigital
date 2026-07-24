@@ -95,8 +95,8 @@ struct RenameSheetView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if scanner.canUndoLastRename {
-                Button("Undo Last Rename") { Task { await undo() } }
+            if scanner.canUndoLastFileOperation {
+                Button("Undo Last Change") { Task { await undo() } }
                     .disabled(isBusy)
             }
             Button("Rename Selected") { Task { await rename() } }
@@ -154,7 +154,7 @@ struct RenameSheetView: View {
         isBusy = true
         defer { isBusy = false }
 
-        let outcomes = await scanner.undoLastRename()
+        let outcomes = await scanner.undoLastFileOperation()
         let failedCount = outcomes.count(where: { !$0.succeeded })
         lastRunSummary = failedCount == 0
             ? "Undid \(outcomes.count) rename(s)."

@@ -23,6 +23,12 @@ struct CleanMyDigitalApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 760, height: 520)
 
+        WindowGroup("Collect into Folders", id: "collect-into-folders") {
+            CollectSheetView(scanner: scanner)
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 760, height: 520)
+
         Settings {
             SettingsView()
         }
