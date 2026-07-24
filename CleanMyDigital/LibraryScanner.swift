@@ -209,6 +209,9 @@ final class LibraryScanner {
                 if let outcome = lookupResults.removeValue(forKey: oldURL) {
                     lookupResults[newURL] = outcome
                 }
+                if let outcome = spectralResults.removeValue(forKey: oldURL) {
+                    spectralResults[newURL] = outcome
+                }
                 results.append(RenameOperationResult(
                     originalURL: oldURL, currentName: proposal.currentName,
                     proposedName: proposal.proposedName, errorDescription: nil))
@@ -260,6 +263,62 @@ final class LibraryScanner {
                 if let outcome = lookupResults.removeValue(forKey: oldURL) {
                     lookupResults[newURL] = outcome
                 }
+                if let outcome = spectralResults.removeValue(forKey: oldURL) {
+                    spectralResults[newURL] = outcome
+                }
+                results.append(RenameOperationResult(
+                    originalURL: oldURL, currentName: proposal.file.fileName,
+                    proposedName: proposal.proposedRelativePath, errorDescription: nil))
+            } catch {
+                results.append(RenameOperationResult(
+                    originalURL: oldURL, currentName: proposal.file.fileName,
+                    proposedName: proposal.proposedRelativePath, errorDescription: error.localizedDescription))
+            }
+        }
+
+        if !batch.isEmpty {
+            lastRenameBatch = batch
+        }
+        return results
+    }
+
+    /// Moves each proposal's file into the "_CleanMyDigital Duplicates"
+    /// review folder (mirroring its original relative path, created as
+    /// needed), same pattern as `collectIntoFolders` — never deletes
+    /// anything, and shares the same undo batch.
+    func moveDuplicates(_ proposals: [DuplicateMoveProposal]) async -> [RenameOperationResult] {
+        guard let scannedFolder else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
+                                       proposedName: $0.proposedRelativePath,
+                                       errorDescription: "No scanned folder to organize within.")
+            }
+        }
+
+        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
+        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+
+        var results: [RenameOperationResult] = []
+        var batch: [RenameLogEntry] = []
+
+        for proposal in proposals {
+            let oldURL = proposal.file.url
+            let newURL = scannedFolder.appendingPathComponent(proposal.proposedRelativePath)
+            let destinationFolder = newURL.deletingLastPathComponent()
+
+            do {
+                try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
+                try performMove(from: oldURL, to: newURL)
+                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL))
+                if let index = files.firstIndex(where: { $0.url == oldURL }) {
+                    files[index] = files[index].renamed(to: newURL)
+                }
+                if let outcome = lookupResults.removeValue(forKey: oldURL) {
+                    lookupResults[newURL] = outcome
+                }
+                if let outcome = spectralResults.removeValue(forKey: oldURL) {
+                    spectralResults[newURL] = outcome
+                }
                 results.append(RenameOperationResult(
                     originalURL: oldURL, currentName: proposal.file.fileName,
                     proposedName: proposal.proposedRelativePath, errorDescription: nil))
@@ -294,6 +353,9 @@ final class LibraryScanner {
                 }
                 if let outcome = lookupResults.removeValue(forKey: entry.newURL) {
                     lookupResults[entry.oldURL] = outcome
+                }
+                if let outcome = spectralResults.removeValue(forKey: entry.newURL) {
+                    spectralResults[entry.oldURL] = outcome
                 }
                 results.append(RenameOperationResult(
                     originalURL: entry.newURL, currentName: entry.newURL.lastPathComponent,

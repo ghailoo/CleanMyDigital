@@ -513,6 +513,13 @@ struct ContentView: View {
             .help("Group each Singles track's mixes into a subfolder named after the release")
         }
         ToolbarItem {
+            Button("Find Duplicates…", systemImage: "doc.on.doc") {
+                openWindow(id: "find-duplicates")
+            }
+            .disabled(scanner.files.isEmpty)
+            .help("Find files sharing the same Artist and Title, and move the lower-quality copy aside")
+        }
+        ToolbarItem {
             Button(scanner.isAnalyzingSpectrum ? "Stop" : "Check for Transcodes",
                    systemImage: scanner.isAnalyzingSpectrum ? "stop.fill" : "waveform.badge.exclamationmark") {
                 if scanner.isAnalyzingSpectrum {

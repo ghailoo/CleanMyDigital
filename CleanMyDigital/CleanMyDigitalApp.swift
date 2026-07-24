@@ -29,6 +29,12 @@ struct CleanMyDigitalApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 760, height: 520)
 
+        WindowGroup("Find Duplicates", id: "find-duplicates") {
+            DuplicatesSheetView(scanner: scanner)
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 820, height: 560)
+
         Settings {
             SettingsView()
         }
