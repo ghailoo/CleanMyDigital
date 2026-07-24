@@ -31,6 +31,7 @@ struct ContentView: View {
     @State private var selection: Set<AudioFile.ID> = []
     @State private var metadataLookupFile: AudioFile?
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
+    @State private var showRenameSheet = false
     @AppStorage("discogsToken") private var discogsToken = ""
     @AppStorage("musicBrainzContact") private var musicBrainzContact = ""
 
@@ -80,6 +81,9 @@ struct ContentView: View {
                       defaultFilename: "CleanMyDigital Report") { _ in }
         .sheet(item: $metadataLookupFile) { file in
             MetadataLookupView(file: file, scanner: scanner, initialProvider: metadataLookupInitialProvider)
+        }
+        .sheet(isPresented: $showRenameSheet) {
+            RenameSheetView(scanner: scanner)
         }
         .navigationTitle("CleanMyDigital")
         .navigationSubtitle(navigationSubtitleText)
@@ -360,6 +364,13 @@ struct ContentView: View {
             .help(scanner.isLookingUp
                   ? "Stop the batch lookup — matches found so far are kept"
                   : "Search Discogs and MusicBrainz for every flagged file's missing metadata")
+        }
+        ToolbarItem {
+            Button("Rename Files…", systemImage: "textformat") {
+                showRenameSheet = true
+            }
+            .disabled(scanner.files.isEmpty)
+            .help("Rename files to \"Artist - Title\" using their tags")
         }
     }
 

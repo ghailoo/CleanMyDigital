@@ -123,4 +123,16 @@ struct AudioFile: Identifiable, Sendable {
         let total = Int(duration.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
     }
+
+    /// A copy of this file at `newURL` — used after a successful rename, so
+    /// the scanner can update its record in place without a full re-scan.
+    func renamed(to newURL: URL) -> AudioFile {
+        AudioFile(url: newURL, fileName: newURL.lastPathComponent, fileExtension: fileExtension,
+                  sizeBytes: sizeBytes, duration: duration,
+                  title: title, artist: artist, album: album,
+                  artworkThumbnail: artworkThumbnail,
+                  year: year, genre: genre, trackNumber: trackNumber,
+                  category: category, expectedArtist: expectedArtist,
+                  isReadable: isReadable)
+    }
 }

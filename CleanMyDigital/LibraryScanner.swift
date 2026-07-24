@@ -9,6 +9,17 @@ import AVFoundation
 import ImageIO
 import Observation
 
+/// The outcome of one attempted rename (forward or undo).
+struct RenameOperationResult: Identifiable, Sendable {
+    let id = UUID()
+    let originalURL: URL
+    let currentName: String
+    let proposedName: String
+    let errorDescription: String?
+
+    var succeeded: Bool { errorDescription == nil }
+}
+
 @Observable
 final class LibraryScanner {
     enum State: Equatable {
@@ -16,6 +27,11 @@ final class LibraryScanner {
         case enumerating
         case scanning
         case finished
+    }
+
+    private struct RenameLogEntry: Sendable {
+        let oldURL: URL
+        let newURL: URL
     }
 
     private(set) var state: State = .idle
@@ -33,6 +49,11 @@ final class LibraryScanner {
     private(set) var lookupTotalCount = 0
 
     private var lookupTask: Task<Void, Never>?
+
+    /// The most recent batch of renames, oldest first — session-only,
+    /// cleared on a new scan. Powers "Undo Last Rename".
+    private var lastRenameBatch: [RenameLogEntry] = []
+    var canUndoLastRename: Bool { !lastRenameBatch.isEmpty }
 
     /// File extensions AVFoundation can read metadata from.
     nonisolated static let supportedExtensions: Set<String> = [
@@ -67,6 +88,7 @@ final class LibraryScanner {
         isLookingUp = false
         lookupCompletedCount = 0
         lookupTotalCount = 0
+        lastRenameBatch = []
 
         let urls = await Task.detached(priority: .userInitiated) {
             Self.audioFileURLs(in: folder)
@@ -133,6 +155,109 @@ final class LibraryScanner {
             files[index] = updated
         }
         lookupResults.removeValue(forKey: file.url)
+    }
+
+    /// Renames each proposal's file via `FileManager.moveItem`, inside the
+    /// scanned folder's security-scoped access (same pattern as
+    /// `applyTagChanges`). Continues past per-file failures — a locked or
+    /// missing file doesn't abort the rest of the batch — and records what
+    /// succeeded so "Undo Last Rename" can reverse it.
+    func renameFiles(_ proposals: [RenameProposal]) async -> [RenameOperationResult] {
+        guard let scannedFolder else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.file.url, currentName: $0.currentName,
+                                       proposedName: $0.proposedName,
+                                       errorDescription: "No scanned folder to rename within.")
+            }
+        }
+
+        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
+        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+
+        var results: [RenameOperationResult] = []
+        var batch: [RenameLogEntry] = []
+
+        for proposal in proposals {
+            let oldURL = proposal.file.url
+            let newURL = oldURL.deletingLastPathComponent().appendingPathComponent(proposal.proposedName)
+
+            do {
+                try performMove(from: oldURL, to: newURL)
+                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL))
+                if let index = files.firstIndex(where: { $0.url == oldURL }) {
+                    files[index] = files[index].renamed(to: newURL)
+                }
+                if let outcome = lookupResults.removeValue(forKey: oldURL) {
+                    lookupResults[newURL] = outcome
+                }
+                results.append(RenameOperationResult(
+                    originalURL: oldURL, currentName: proposal.currentName,
+                    proposedName: proposal.proposedName, errorDescription: nil))
+            } catch {
+                results.append(RenameOperationResult(
+                    originalURL: oldURL, currentName: proposal.currentName,
+                    proposedName: proposal.proposedName, errorDescription: error.localizedDescription))
+            }
+        }
+
+        if !batch.isEmpty {
+            lastRenameBatch = batch
+        }
+        return results
+    }
+
+    /// Reverses the most recent rename batch, most-recent-first so any
+    /// collision-avoidance ordering unwinds correctly.
+    func undoLastRename() async -> [RenameOperationResult] {
+        guard let scannedFolder, !lastRenameBatch.isEmpty else { return [] }
+
+        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
+        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+
+        var results: [RenameOperationResult] = []
+        for entry in lastRenameBatch.reversed() {
+            do {
+                try performMove(from: entry.newURL, to: entry.oldURL)
+                if let index = files.firstIndex(where: { $0.url == entry.newURL }) {
+                    files[index] = files[index].renamed(to: entry.oldURL)
+                }
+                if let outcome = lookupResults.removeValue(forKey: entry.newURL) {
+                    lookupResults[entry.oldURL] = outcome
+                }
+                results.append(RenameOperationResult(
+                    originalURL: entry.newURL, currentName: entry.newURL.lastPathComponent,
+                    proposedName: entry.oldURL.lastPathComponent, errorDescription: nil))
+            } catch {
+                results.append(RenameOperationResult(
+                    originalURL: entry.newURL, currentName: entry.newURL.lastPathComponent,
+                    proposedName: entry.oldURL.lastPathComponent, errorDescription: error.localizedDescription))
+            }
+        }
+        lastRenameBatch = []
+        return results
+    }
+
+    /// Moves `source` to `destination`, going through a temporary name
+    /// first when the two differ only by letter case — APFS is
+    /// case-insensitive, so a direct rename between such paths doesn't
+    /// reliably take effect.
+    private func performMove(from source: URL, to destination: URL) throws {
+        let sourceName = source.lastPathComponent
+        let destinationName = destination.lastPathComponent
+        guard sourceName != destinationName, sourceName.lowercased() == destinationName.lowercased() else {
+            try FileManager.default.moveItem(at: source, to: destination)
+            return
+        }
+
+        let tempURL = destination.deletingLastPathComponent()
+            .appendingPathComponent(".cleanmydigital-rename-\(UUID().uuidString)")
+        try FileManager.default.moveItem(at: source, to: tempURL)
+        do {
+            try FileManager.default.moveItem(at: tempURL, to: destination)
+        } catch {
+            try? FileManager.default.moveItem(at: tempURL, to: source)
+            throw error
+        }
     }
 
     /// Looks up every flagged file against Discogs, then MusicBrainz, one at
