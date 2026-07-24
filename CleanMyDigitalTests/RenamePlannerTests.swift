@@ -204,6 +204,7 @@ struct RenamePlannerTests {
             fileExtension: url.pathExtension,
             sizeBytes: 1024,
             duration: 180,
+            bitrateKbps: nil,
             title: title,
             artist: artist,
             album: "Album",

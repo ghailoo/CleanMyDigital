@@ -18,7 +18,7 @@ enum FLACMetadataReader {
     static func read(contentsOf url: URL) throws -> NativeAudioMetadata {
         let bytes = [UInt8](try Data(contentsOf: url))
         let streamStart = try FLACStream.streamStart(in: bytes)
-        let (blocks, _) = try FLACStream.parseBlocks(in: bytes, streamStart: streamStart)
+        let (blocks, audioStart) = try FLACStream.parseBlocks(in: bytes, streamStart: streamStart)
 
         var vorbisComment: [UInt8]?
         var pictures: [[UInt8]] = []
@@ -34,6 +34,7 @@ enum FLACMetadataReader {
         }
 
         var metadata = NativeAudioMetadata()
+        metadata.audioDataSize = Int64(bytes.count - audioStart)
         if let vorbisComment {
             let (_, comments) = FLACStream.parseVorbisComment(vorbisComment)
             func value(for field: String) -> String? {

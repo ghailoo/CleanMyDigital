@@ -84,6 +84,7 @@ struct CollectionPlannerTests {
             fileExtension: url.pathExtension,
             sizeBytes: 1024,
             duration: 180,
+            bitrateKbps: nil,
             title: title,
             artist: "Artist",
             album: "Album",

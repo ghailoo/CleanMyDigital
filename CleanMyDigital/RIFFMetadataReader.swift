@@ -20,6 +20,9 @@ enum RIFFMetadataReader {
         let chunks = try RIFFStream.parseChunks(in: bytes)
 
         var metadata = NativeAudioMetadata()
+        if let dataChunk = chunks.first(where: { $0.id.uppercased() == "DATA" }) {
+            metadata.audioDataSize = Int64(dataChunk.data.count)
+        }
 
         if let list = chunks.first(where: { RIFFStream.isListInfoChunk($0) }) {
             let fields = RIFFStream.parseListInfoFields(list.data)

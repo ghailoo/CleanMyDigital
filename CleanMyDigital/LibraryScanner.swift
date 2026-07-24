@@ -424,7 +424,7 @@ final class LibraryScanner {
 
         func unreadable() -> AudioFile {
             AudioFile(url: url, fileName: url.lastPathComponent, fileExtension: ext,
-                      sizeBytes: size, duration: nil,
+                      sizeBytes: size, duration: nil, bitrateKbps: nil,
                       title: nil, artist: nil, album: nil,
                       artworkThumbnail: nil,
                       year: nil, genre: nil, trackNumber: nil,
@@ -463,6 +463,9 @@ final class LibraryScanner {
             default: native = nil
             }
 
+            let bitrateKbps = await Self.audioBitrateKbps(
+                for: asset, fallbackAudioDataSize: native?.audioDataSize, duration: duration)
+
             var artwork = await artworkThumbnail(in: items)
             if artwork == nil, let artworkData = native?.artworkData {
                 artwork = downscaledImage(from: artworkData, maxPixelSize: thumbnailMaxPixelSize)
@@ -474,6 +477,7 @@ final class LibraryScanner {
                 fileExtension: ext,
                 sizeBytes: size,
                 duration: duration,
+                bitrateKbps: bitrateKbps,
                 title: mergedValue(
                     avFoundation: await stringValue(in: items, common: .commonIdentifierTitle,
                                                      keys: ["TIT2", "TT2", "©nam", "title", "TITLE"]),
@@ -506,6 +510,32 @@ final class LibraryScanner {
         } catch {
             return unreadable()
         }
+    }
+
+    /// The audio track's real encoded bitrate in kbps, read from the
+    /// decoded audio stream itself rather than estimated from whole-file
+    /// size ÷ duration — that naive estimate double-counts embedded
+    /// artwork and tag bytes as if they were audio data, skewing short
+    /// tracks with large cover images upward. Isolating the audio track
+    /// (excluding any embedded artwork/video track) avoids that.
+    ///
+    /// `AVAssetTrack.estimatedDataRate` comes back unavailable for FLAC and
+    /// WAV specifically (confirmed empirically, same AVFoundation gap
+    /// documented above for tag reading) — `fallbackAudioDataSize`, the
+    /// native readers' byte count for just the audio-sample chunk/block,
+    /// covers those instead.
+    nonisolated private static func audioBitrateKbps(
+        for asset: AVURLAsset, fallbackAudioDataSize: Int64?, duration: Double?
+    ) async -> Int? {
+        if let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
+           let rate = try? await audioTrack.load(.estimatedDataRate), rate > 0 {
+            return Int((rate / 1000).rounded())
+        }
+
+        guard let fallbackAudioDataSize, fallbackAudioDataSize > 0,
+              let duration, duration > 0
+        else { return nil }
+        return Int((Double(fallbackAudioDataSize) * 8 / duration / 1000).rounded())
     }
 
     /// AVFoundation's reading wins when it found something — a native

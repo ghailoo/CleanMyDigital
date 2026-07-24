@@ -47,6 +47,12 @@ struct AudioFile: Identifiable, Sendable {
     let fileExtension: String
     let sizeBytes: Int64
     let duration: TimeInterval?
+    /// The audio track's real encoded bitrate in kbps, read directly from
+    /// the decoded audio stream via `AVAssetTrack.estimatedDataRate` — not
+    /// estimated from whole-file size ÷ duration, which embedded artwork
+    /// or tag padding can skew upward. Nil if unreadable or AVFoundation
+    /// couldn't report a rate.
+    let bitrateKbps: Int?
 
     let title: String?
     let artist: String?
@@ -124,11 +130,20 @@ struct AudioFile: Identifiable, Sendable {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
+    var formattedBitrate: String {
+        guard let bitrateKbps else { return "–" }
+        return "\(bitrateKbps.formatted()) kbps"
+    }
+
+    /// Sort key for the Bitrate column — missing values sort below every
+    /// real bitrate instead of colliding at zero.
+    var bitrateSortKey: Int { bitrateKbps ?? -1 }
+
     /// A copy of this file at `newURL` — used after a successful rename, so
     /// the scanner can update its record in place without a full re-scan.
     func renamed(to newURL: URL) -> AudioFile {
         AudioFile(url: newURL, fileName: newURL.lastPathComponent, fileExtension: fileExtension,
-                  sizeBytes: sizeBytes, duration: duration,
+                  sizeBytes: sizeBytes, duration: duration, bitrateKbps: bitrateKbps,
                   title: title, artist: artist, album: album,
                   artworkThumbnail: artworkThumbnail,
                   year: year, genre: genre, trackNumber: trackNumber,

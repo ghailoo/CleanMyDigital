@@ -18,4 +18,9 @@ struct NativeAudioMetadata {
     var genre: String?
     var trackNumber: String?
     var artworkData: Data?
+    /// The size, in bytes, of just the audio-sample data — excluding the
+    /// container header and every metadata/tag/artwork chunk. Lets bitrate
+    /// be computed accurately for formats where AVFoundation's own
+    /// `AVAssetTrack.estimatedDataRate` comes back unavailable (FLAC, WAV).
+    var audioDataSize: Int64?
 }

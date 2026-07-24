@@ -23,6 +23,9 @@ enum AIFFMetadataReader {
         if let id3Chunk = chunks.first(where: { AIFFStream.isID3Chunk($0) }) {
             ID3ChunkMetadata.merge(id3ChunkData: id3Chunk.data, into: &metadata)
         }
+        if let soundChunk = chunks.first(where: { $0.id.uppercased() == "SSND" }) {
+            metadata.audioDataSize = Int64(soundChunk.data.count)
+        }
         return metadata
     }
 }

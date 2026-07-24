@@ -337,6 +337,10 @@ struct ContentView: View {
             }
             .width(72)
 
+            TableColumn("Bitrate", value: \.bitrateSortKey) { file in
+                Text(file.formattedBitrate).help("Real encoded bitrate, read from the audio stream itself")
+            }
+            .width(70)
             TableColumn("Length", value: \.formattedDuration).width(60)
             TableColumn("Size", value: \.formattedSize).width(80)
         }
@@ -470,6 +474,7 @@ struct ContentView: View {
         header.append("Genre")
         if includeSinglesOnlyFields { header.append("Track Number") }
         header.append("Issues")
+        header.append("Bitrate (kbps)")
         header.append("Duration")
         header.append("Size")
 
@@ -491,6 +496,7 @@ struct ContentView: View {
             row.append(file.genre ?? "")
             if includeSinglesOnlyFields { row.append(file.trackNumber ?? "") }
             row.append(issues)
+            row.append(file.bitrateKbps.map(String.init) ?? "")
             row.append(file.formattedDuration)
             row.append(file.formattedSize)
             lines.append(row.map(csvField).joined(separator: ","))
