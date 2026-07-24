@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var showCSVExporter = false
     @State private var csvDocument = CSVDocument(text: "")
     @State private var selectedCategory: LibraryCategory = .albums
+    @State private var showCategoryPrompt = true
     @State private var filter: Filter = .issues
     @State private var searchText = ""
     @State private var sortOrder = [KeyPathComparator(\AudioFile.fileName)]
@@ -85,6 +86,9 @@ struct ContentView: View {
         .sheet(isPresented: $showRenameSheet) {
             RenameSheetView(scanner: scanner)
         }
+        .sheet(isPresented: $showCategoryPrompt) {
+            categoryPromptSheet
+        }
         .navigationTitle("CleanMyDigital")
         .navigationSubtitle(navigationSubtitleText)
     }
@@ -97,6 +101,61 @@ struct ContentView: View {
     }
 
     // MARK: - States
+
+    /// Forces an explicit Singles/Albums/Compilations choice at launch,
+    /// before the user can pick a folder — each category uses different
+    /// scan rules and different Discogs/MusicBrainz search behavior, so
+    /// silently defaulting to one was easy to miss.
+    private var categoryPromptSheet: some View {
+        VStack(spacing: 20) {
+            Text("What are you scanning?")
+                .font(.title2.weight(.semibold))
+            Text("Singles, Albums, and Compilations are checked against different rules and searched differently on Discogs and MusicBrainz.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+
+            VStack(spacing: 10) {
+                ForEach(LibraryCategory.allCases) { category in
+                    Button {
+                        selectedCategory = category
+                        showCategoryPrompt = false
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(category.rawValue).font(.headline)
+                            Text(categoryPromptDescription(category))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
+            }
+            .frame(maxWidth: 360)
+        }
+        .padding(32)
+        .frame(minWidth: 420, minHeight: 340)
+        .interactiveDismissDisabled()
+    }
+
+    private func categoryPromptDescription(_ category: LibraryCategory) -> String {
+        switch category {
+        case .singles:
+            "Individual tracks and maxi-singles. No track-number or artist-folder checks."
+        case .albums:
+            "Files organized as ArtistName/AlbumName/Track. Artist tag is checked against its folder."
+        case .compilations:
+            "Various-artist collections. No artist-folder check."
+        }
+    }
 
     private var emptyState: some View {
         ContentUnavailableView {
