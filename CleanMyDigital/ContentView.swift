@@ -216,6 +216,14 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            if scanner.isAnalyzingSpectrum {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Analyzing \(scanner.spectralCompletedCount) of \(scanner.spectralTotalCount)…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Picker("Filter", selection: $filter) {
                 ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -274,6 +282,40 @@ struct ContentView: View {
                 .background(Color.gray.opacity(0.15), in: Capsule())
         case nil:
             EmptyView()
+        }
+    }
+
+    /// Frequencies still real above this are "full range" — below it,
+    /// mirrors the well-known ~16kHz ceiling a 128kbps lossy encode
+    /// leaves behind even after being re-encoded into something that
+    /// claims to be higher quality.
+    private static let suspiciousCutoffThresholdHz = 17000.0
+
+    @ViewBuilder
+    private func spectralCutoffCell(for file: AudioFile) -> some View {
+        switch scanner.spectralResults[file.url] {
+        case .measured(let hz):
+            let isLow = hz < Self.suspiciousCutoffThresholdHz
+            HStack(spacing: 3) {
+                if isLow {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+                Text(String(format: "%.1f kHz", hz / 1000))
+                    .foregroundStyle(isLow ? .orange : .primary)
+            }
+            .help(isLow
+                  ? "Frequencies above ~\(Int(hz / 1000))kHz are missing — likely re-encoded from a lower-bitrate source"
+                  : "Full-range audio up to ~\(Int(hz / 1000))kHz")
+        case .inconclusive:
+            Text("–").foregroundStyle(.tertiary).help("Too short or quiet to measure")
+        case .failed(let message):
+            Image(systemName: "questionmark.circle")
+                .foregroundStyle(.secondary)
+                .help(message)
+        case nil:
+            Text("–").foregroundStyle(.tertiary)
         }
     }
 
@@ -339,6 +381,10 @@ struct ContentView: View {
 
             TableColumn("Bitrate", value: \.bitrateSortKey) { file in
                 Text(file.formattedBitrate).help("Real encoded bitrate, read from the audio stream itself")
+            }
+            .width(70)
+            TableColumn("Cutoff") { file in
+                spectralCutoffCell(for: file)
             }
             .width(70)
             TableColumn("Length", value: \.formattedDuration).width(60)
@@ -442,6 +488,20 @@ struct ContentView: View {
             }
             .disabled(scanner.files.isEmpty)
             .help("Group each Singles track's mixes into a subfolder named after the release")
+        }
+        ToolbarItem {
+            Button(scanner.isAnalyzingSpectrum ? "Stop" : "Check for Transcodes",
+                   systemImage: scanner.isAnalyzingSpectrum ? "stop.fill" : "waveform.badge.exclamationmark") {
+                if scanner.isAnalyzingSpectrum {
+                    scanner.cancelSpectrumAnalysis()
+                } else {
+                    scanner.analyzeSpectrum()
+                }
+            }
+            .disabled(!scanner.isAnalyzingSpectrum && scanner.files.isEmpty)
+            .help(scanner.isAnalyzingSpectrum
+                  ? "Stop the spectral analysis — cutoffs measured so far are kept"
+                  : "Measure each file's real frequency cutoff to flag likely transcoded/fake-quality files")
         }
     }
 

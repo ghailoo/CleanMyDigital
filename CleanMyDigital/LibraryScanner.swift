@@ -50,6 +50,15 @@ final class LibraryScanner {
 
     private var lookupTask: Task<Void, Never>?
 
+    /// Batch "Check for Transcodes" results, keyed by file URL. Session-only
+    /// — cleared whenever a new scan starts.
+    private(set) var spectralResults: [URL: SpectralCutoffOutcome] = [:]
+    private(set) var isAnalyzingSpectrum = false
+    private(set) var spectralCompletedCount = 0
+    private(set) var spectralTotalCount = 0
+
+    private var spectralTask: Task<Void, Never>?
+
     /// The most recent batch of file moves, oldest first — renames and
     /// "Collect into Folders" moves share this same slot, since both are
     /// just `FileManager.moveItem` under the hood. Session-only, cleared on
@@ -90,6 +99,14 @@ final class LibraryScanner {
         isLookingUp = false
         lookupCompletedCount = 0
         lookupTotalCount = 0
+
+        spectralTask?.cancel()
+        spectralTask = nil
+        spectralResults = [:]
+        isAnalyzingSpectrum = false
+        spectralCompletedCount = 0
+        spectralTotalCount = 0
+
         lastRenameBatch = []
 
         let urls = await Task.detached(priority: .userInitiated) {
@@ -344,6 +361,61 @@ final class LibraryScanner {
     /// whatever was already found stays in `lookupResults`.
     func cancelLookup() {
         lookupTask?.cancel()
+    }
+
+    /// Measures a "spectral cutoff" — the highest frequency still carrying
+    /// real signal energy — for every readable file, the same signature a
+    /// spectrogram viewer like Spek shows visually as a hard ceiling. Runs
+    /// with bounded concurrency like the initial scan, since this is
+    /// CPU-bound decode+FFT work rather than a rate-limited network call.
+    func analyzeSpectrum() {
+        guard !isAnalyzingSpectrum else { return }
+        let targets = files.filter(\.isReadable)
+        guard !targets.isEmpty else { return }
+
+        spectralCompletedCount = 0
+        spectralTotalCount = targets.count
+        isAnalyzingSpectrum = true
+
+        spectralTask = Task {
+            let maxConcurrent = 4
+            await withTaskGroup(of: (URL, SpectralCutoffOutcome).self) { group in
+                var iterator = targets.makeIterator()
+
+                func addNext() {
+                    guard let file = iterator.next() else { return }
+                    group.addTask {
+                        let outcome: SpectralCutoffOutcome
+                        do {
+                            outcome = try await SpectralCutoffReader.analyze(url: file.url)
+                        } catch {
+                            outcome = .failed(error.localizedDescription)
+                        }
+                        return (file.url, outcome)
+                    }
+                }
+
+                for _ in 0..<maxConcurrent { addNext() }
+
+                for await (url, outcome) in group {
+                    if Task.isCancelled {
+                        group.cancelAll()
+                        break
+                    }
+                    spectralResults[url] = outcome
+                    spectralCompletedCount += 1
+                    addNext()
+                }
+            }
+            isAnalyzingSpectrum = false
+            spectralTask = nil
+        }
+    }
+
+    /// Stops the batch spectral analysis after in-flight files finish —
+    /// whatever was already measured stays in `spectralResults`.
+    func cancelSpectrumAnalysis() {
+        spectralTask?.cancel()
     }
 
     /// Searches Discogs first; only falls through to MusicBrainz if Discogs
