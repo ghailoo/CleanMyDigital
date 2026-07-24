@@ -4,6 +4,7 @@
 //
 
 import AVFoundation
+import CoreMedia
 import Foundation
 
 /// The result of one file's spectral-cutoff analysis.
@@ -22,52 +23,89 @@ enum SpectralCutoffOutcome: Sendable {
 /// windows from the middle of the track (skipping the first/last 10%,
 /// which are often fades or silence) — enough to reliably catch a
 /// transcode's frequency ceiling without decoding the whole file.
+///
+/// Decodes via `AVAssetReader` rather than `AVAudioFile` — confirmed
+/// empirically that `AVAudioFile` goes through a lower-level Core Audio
+/// path that fails under App Sandbox for some files on a network share
+/// (a Core Audio permission-flavored error, even with the scanned
+/// folder's security-scoped access already active), while the exact same
+/// files decode fine via `AVAssetReader`, which rides the same
+/// `AVURLAsset` pipeline already used successfully elsewhere in this app
+/// for tag and duration reading.
 enum SpectralCutoffReader {
     private static let sampleWindowSeconds = 6.0
     private static let sampleFractions: [Double] = [0.25, 0.5, 0.75]
 
     static func analyze(url: URL) async throws -> SpectralCutoffOutcome {
-        let audioFile = try AVAudioFile(forReading: url)
-        let format = audioFile.processingFormat
-        let sampleRate = format.sampleRate
-        let totalFrames = audioFile.length
-        let windowFrames = AVAudioFrameCount(sampleWindowSeconds * sampleRate)
-
-        guard totalFrames > 0, windowFrames > 0 else { return .inconclusive }
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
+            return .inconclusive
+        }
+        let duration = try await asset.load(.duration).seconds
+        guard duration.isFinite, duration > 0 else { return .inconclusive }
 
         var samples: [Float] = []
+        var sampleRate: Double?
         for fraction in sampleFractions {
-            let startFrame = AVAudioFramePosition(Double(totalFrames) * fraction)
-            guard startFrame + AVAudioFramePosition(windowFrames) <= totalFrames,
-                  let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: windowFrames)
+            let start = duration * fraction
+            guard start + sampleWindowSeconds <= duration,
+                  let (windowSamples, rate) = try readPCMSamples(
+                    asset: asset, track: track, start: start, duration: sampleWindowSeconds)
             else { continue }
-
-            audioFile.framePosition = startFrame
-            try audioFile.read(into: buffer, frameCount: windowFrames)
-            samples.append(contentsOf: monoSamples(from: buffer))
+            samples.append(contentsOf: windowSamples)
+            if sampleRate == nil { sampleRate = rate }
         }
 
-        guard !samples.isEmpty,
+        guard !samples.isEmpty, let sampleRate,
               let hz = SpectralCutoffAnalyzer.highestSignificantFrequency(samples: samples, sampleRate: sampleRate)
         else { return .inconclusive }
         return .measured(hz: hz)
     }
 
-    /// Averages every channel down to mono — the cutoff analysis only
-    /// cares about frequency content, not stereo image.
-    private static func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
-        guard let channelData = buffer.floatChannelData else { return [] }
-        let channelCount = Int(buffer.format.channelCount)
-        let frameLength = Int(buffer.frameLength)
-        guard channelCount > 0, frameLength > 0 else { return [] }
+    /// Decodes one time window to mono Float32 PCM. Requesting a single
+    /// output channel lets `AVAssetReader` do the stereo-to-mono mixdown
+    /// itself, and the real sample rate is read back from the delivered
+    /// sample buffer's format description rather than assumed.
+    private static func readPCMSamples(
+        asset: AVURLAsset, track: AVAssetTrack, start: Double, duration: Double
+    ) throws -> (samples: [Float], sampleRate: Double)? {
+        let reader = try AVAssetReader(asset: asset)
+        reader.timeRange = CMTimeRange(
+            start: CMTime(seconds: start, preferredTimescale: 600),
+            duration: CMTime(seconds: duration, preferredTimescale: 600))
 
-        var mono = [Float](repeating: 0, count: frameLength)
-        for channel in 0..<channelCount {
-            let channelPointer = channelData[channel]
-            for frame in 0..<frameLength {
-                mono[frame] += channelPointer[frame] / Float(channelCount)
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsNonInterleaved: false,
+            AVNumberOfChannelsKey: 1,
+        ]
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
+        reader.add(output)
+        guard reader.startReading() else { return nil }
+
+        var samples: [Float] = []
+        var sampleRate: Double?
+        while let sampleBuffer = output.copyNextSampleBuffer() {
+            if sampleRate == nil,
+               let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) {
+                sampleRate = asbd.pointee.mSampleRate
+            }
+            guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
+            let length = CMBlockBufferGetDataLength(blockBuffer)
+            var data = [UInt8](repeating: 0, count: length)
+            guard let status = data.withUnsafeMutableBytes({ rawBuffer -> OSStatus? in
+                guard let baseAddress = rawBuffer.baseAddress else { return nil }
+                return CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
+            }), status == noErr else { continue }
+            data.withUnsafeBytes { raw in
+                samples.append(contentsOf: raw.bindMemory(to: Float.self))
             }
         }
-        return mono
+
+        guard reader.status != .failed, let finalRate = sampleRate else { return nil }
+        return (samples, finalRate)
     }
 }
