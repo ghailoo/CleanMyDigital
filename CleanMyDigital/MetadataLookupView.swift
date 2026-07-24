@@ -120,6 +120,8 @@ private struct DiscogsTabView: View {
     @State private var errorMessage: String?
     @State private var results: [DiscogsRelease] = []
     @State private var selectedRelease: DiscogsRelease?
+    @State private var artistText = ""
+    @State private var trackText = ""
 
     private var query: DiscogsQuery { DiscogsQuery(for: file) }
 
@@ -127,9 +129,15 @@ private struct DiscogsTabView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if selectedRelease == nil {
+                searchFieldsRow
+                Divider()
+            }
             content
         }
         .task(id: file.id) {
+            artistText = query.artist
+            trackText = query.track
             await search()
         }
     }
@@ -151,6 +159,25 @@ private struct DiscogsTabView: View {
             Button("Done") { dismiss() }
         }
         .padding()
+    }
+
+    /// Lets the user override the auto-derived artist/track terms and
+    /// re-search — the automatic cleanup (stripping "Artist - " prefixes,
+    /// mix names) doesn't always guess right, and there was previously no
+    /// way to correct it short of renaming the file.
+    private var searchFieldsRow: some View {
+        HStack(spacing: 8) {
+            TextField("Artist", text: $artistText)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await search() } }
+            TextField("Track", text: $trackText)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await search() } }
+            Button("Search") { Task { await search() } }
+                .disabled(discogsToken.isEmpty)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -207,7 +234,10 @@ private struct DiscogsTabView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            results = try await DiscogsClient.search(artist: query.artist, track: query.track, token: discogsToken)
+            results = try await DiscogsClient.search(
+                artist: artistText.trimmingCharacters(in: .whitespacesAndNewlines),
+                track: trackText.trimmingCharacters(in: .whitespacesAndNewlines),
+                token: discogsToken)
         } catch {
             errorMessage = error.localizedDescription
             results = []
@@ -527,6 +557,8 @@ private struct MusicBrainzTabView: View {
     @State private var errorMessage: String?
     @State private var results: [MusicBrainzRecording] = []
     @State private var selectedRecording: MusicBrainzRecording?
+    @State private var artistText = ""
+    @State private var recordingText = ""
 
     private var query: MusicBrainzQuery { MusicBrainzQuery(for: file) }
 
@@ -534,9 +566,15 @@ private struct MusicBrainzTabView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if selectedRecording == nil {
+                searchFieldsRow
+                Divider()
+            }
             content
         }
         .task(id: file.id) {
+            artistText = query.artist
+            recordingText = query.recording
             await search()
         }
     }
@@ -558,6 +596,23 @@ private struct MusicBrainzTabView: View {
             Button("Done") { dismiss() }
         }
         .padding()
+    }
+
+    /// Lets the user override the auto-derived artist/recording terms and
+    /// re-search, same as the Discogs tab.
+    private var searchFieldsRow: some View {
+        HStack(spacing: 8) {
+            TextField("Artist", text: $artistText)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await search() } }
+            TextField("Recording", text: $recordingText)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await search() } }
+            Button("Search") { Task { await search() } }
+                .disabled(musicBrainzContact.isEmpty)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -615,7 +670,9 @@ private struct MusicBrainzTabView: View {
         defer { isLoading = false }
         do {
             results = try await MusicBrainzClient.searchRecordings(
-                artist: query.artist, recording: query.recording, contactEmail: musicBrainzContact)
+                artist: artistText.trimmingCharacters(in: .whitespacesAndNewlines),
+                recording: recordingText.trimmingCharacters(in: .whitespacesAndNewlines),
+                contactEmail: musicBrainzContact)
         } catch {
             errorMessage = error.localizedDescription
             results = []
