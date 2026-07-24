@@ -19,6 +19,43 @@ struct RenamePlannerTests {
         #expect(proposals.first?.proposedName == "808 State - Pacific 0101 (Remix Edit).flac")
     }
 
+    @Test func singlesAppendsMixFromFilenameWhenTitleLacksIt() {
+        let file = Self.makeFile(
+            path: "/Library/Singles/2 In A Room/She's Got Me Going Crazy (12\" Mix).flac",
+            title: "She's Got Me Going Crazy", artist: "2 In A Room",
+            category: .singles)
+
+        let proposals = RenamePlanner.plan(for: [file])
+        #expect(proposals.first?.proposedName == "2 In A Room - She's Got Me Going Crazy (12\" Mix).flac")
+    }
+
+    @Test func singlesDoesNotDuplicateMixAlreadyInTitle() {
+        let file = Self.makeFile(
+            path: "/Library/Singles/808 State/track (Remix Edit).flac",
+            title: "Pacific 0101 (Remix Edit)", artist: "808 State",
+            category: .singles)
+
+        let proposals = RenamePlanner.plan(for: [file])
+        #expect(proposals.first?.proposedName == "808 State - Pacific 0101 (Remix Edit).flac")
+    }
+
+    @Test func singlesWithDifferentMixesInSameFolderStayDistinct() {
+        let clubMix = Self.makeFile(
+            path: "/Library/Singles/2 In A Room/01 - Ahora Es (Club Mix).flac",
+            title: "Ahora Es", artist: "2 In A Room",
+            category: .singles)
+        let radioEdit = Self.makeFile(
+            path: "/Library/Singles/2 In A Room/02 - Ahora Es (Radio Edit).flac",
+            title: "Ahora Es", artist: "2 In A Room",
+            category: .singles)
+
+        let proposals = RenamePlanner.plan(for: [clubMix, radioEdit])
+            .sorted { $0.currentName < $1.currentName }
+        #expect(proposals.count == 2)
+        #expect(proposals[0].proposedName == "2 In A Room - Ahora Es (Club Mix).flac")
+        #expect(proposals[1].proposedName == "2 In A Room - Ahora Es (Radio Edit).flac")
+    }
+
     @Test func albumsTemplateIncludesPaddedTrackNumber() {
         let file = Self.makeFile(
             path: "/Library/Albums/Boards of Canada/Music Has the Right to Children/02 track.flac",

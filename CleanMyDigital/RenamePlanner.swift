@@ -100,9 +100,18 @@ enum RenamePlanner {
 
         switch file.category {
         case .singles:
-            // My library convention — the title tag usually already
-            // carries the "(Mix)" suffix, so no separate mix field needed.
-            return "\(artist) - \(title)"
+            let base = "\(artist) - \(title)"
+            // The Title tag doesn't reliably carry the mix/version name —
+            // a Discogs/MusicBrainz match can fill Title without it, which
+            // would otherwise collapse a folder's many different mixes of
+            // the same song down to the same proposed name (silently
+            // losing the mix identifier to a meaningless " (2)", " (3)"
+            // collision suffix). Pull it from the original filename
+            // instead, which is why it's reliably there in this library.
+            guard let mixSuffix = filenameMixSuffix(for: file),
+                  !title.localizedCaseInsensitiveContains(mixSuffix)
+            else { return base }
+            return "\(base) \(mixSuffix)"
         case .albums, .compilations:
             if let trackNumber = file.trackNumber {
                 let (part, _) = TagWriteHelpers.parseTrackPosition(trackNumber)
@@ -112,6 +121,16 @@ enum RenamePlanner {
             }
             return "\(artist) - \(title)"
         }
+    }
+
+    /// The trailing parenthetical from the original filename — e.g. "(12"
+    /// Mix)" — or nil if the filename doesn't end with one.
+    private static func filenameMixSuffix(for file: AudioFile) -> String? {
+        let baseName = (file.fileName as NSString).deletingPathExtension
+        guard let range = baseName.range(of: #"\([^()]*\)\s*$"#, options: .regularExpression) else {
+            return nil
+        }
+        return String(baseName[range]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Replaces path-hostile characters, collapses whitespace, and trims —
