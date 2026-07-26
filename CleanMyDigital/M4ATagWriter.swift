@@ -20,8 +20,29 @@ enum M4ATagWriter {
             throw TagWriteError.underlying(error)
         }
 
-        func hasExisting(_ identifier: AVMetadataIdentifier) -> Bool {
-            !AVMetadataItem.metadataItems(from: existingItems, filteredByIdentifier: identifier).isEmpty
+        // Checks for a genuinely non-empty existing value, not just the
+        // atom's presence — some M4As carry an empty or whitespace-only
+        // Year/Genre atom (present, but with nothing readable in it), which
+        // the scanner already treats as missing. Checking presence alone
+        // would let that empty atom block ever writing a real value.
+        //
+        // Uses the async `load(.stringValue)`/`load(.dataValue)` API
+        // rather than the synchronous `.stringValue`/`.dataValue`/`.value`
+        // properties — those are deprecated for items obtained via
+        // `asset.load(.metadata)` and (confirmed empirically) unreliably
+        // return nil for them, which made this check silently never see
+        // any existing value at all.
+        func hasExisting(_ identifier: AVMetadataIdentifier) async -> Bool {
+            for item in AVMetadataItem.metadataItems(from: existingItems, filteredByIdentifier: identifier) {
+                if let string = try? await item.load(.stringValue),
+                   !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return true
+                }
+                if let data = try? await item.load(.dataValue), !data.isEmpty {
+                    return true
+                }
+            }
+            return false
         }
 
         func stringItem(_ identifier: AVMetadataIdentifier, _ value: String) -> AVMetadataItem {
@@ -32,24 +53,32 @@ enum M4ATagWriter {
             return item
         }
 
+        let hasTitle = await hasExisting(.iTunesMetadataSongName)
+        let hasArtist = await hasExisting(.iTunesMetadataArtist)
+        let hasAlbum = await hasExisting(.iTunesMetadataAlbum)
+        let hasYear = await hasExisting(.iTunesMetadataReleaseDate)
+        let hasGenre = await hasExisting(.iTunesMetadataUserGenre)
+        let hasTrackNumber = await hasExisting(.iTunesMetadataTrackNumber)
+        let hasArtwork = await hasExisting(.commonIdentifierArtwork)
+
         var newItems: [AVMetadataItem] = []
 
-        if let title = changes.title, !hasExisting(.iTunesMetadataSongName) {
+        if let title = changes.title, !hasTitle {
             newItems.append(stringItem(.iTunesMetadataSongName, title))
         }
-        if let artist = changes.artist, !hasExisting(.iTunesMetadataArtist) {
+        if let artist = changes.artist, !hasArtist {
             newItems.append(stringItem(.iTunesMetadataArtist, artist))
         }
-        if let album = changes.album, !hasExisting(.iTunesMetadataAlbum) {
+        if let album = changes.album, !hasAlbum {
             newItems.append(stringItem(.iTunesMetadataAlbum, album))
         }
-        if let year = changes.year, !hasExisting(.iTunesMetadataReleaseDate) {
+        if let year = changes.year, !hasYear {
             newItems.append(stringItem(.iTunesMetadataReleaseDate, year))
         }
-        if let genre = changes.genre, !hasExisting(.iTunesMetadataUserGenre) {
+        if let genre = changes.genre, !hasGenre {
             newItems.append(stringItem(.iTunesMetadataUserGenre, genre))
         }
-        if let trackNumber = changes.trackNumber, !hasExisting(.iTunesMetadataTrackNumber) {
+        if let trackNumber = changes.trackNumber, !hasTrackNumber {
             let (part, total) = TagWriteHelpers.parseTrackPosition(trackNumber)
             // The `trkn` iTunes atom is packed binary: 2 bytes padding,
             // 2 bytes track number, 2 bytes total tracks, 2 bytes padding.
@@ -65,7 +94,7 @@ enum M4ATagWriter {
             item.value = Data(bytes) as NSData
             newItems.append(item)
         }
-        if let artworkJPEG = changes.artworkJPEG, !hasExisting(.commonIdentifierArtwork) {
+        if let artworkJPEG = changes.artworkJPEG, !hasArtwork {
             let item = AVMutableMetadataItem()
             item.identifier = .iTunesMetadataCoverArt
             item.dataType = kCMMetadataBaseDataType_JPEG as String
