@@ -122,6 +122,7 @@ private struct DiscogsTabView: View {
     @State private var selectedRelease: DiscogsRelease?
     @State private var artistText = ""
     @State private var trackText = ""
+    @State private var albumText = ""
 
     private var query: DiscogsQuery { DiscogsQuery(for: file) }
 
@@ -138,6 +139,7 @@ private struct DiscogsTabView: View {
         .task(id: file.id) {
             artistText = query.artist
             trackText = query.track
+            albumText = query.album
             await search()
         }
     }
@@ -173,6 +175,11 @@ private struct DiscogsTabView: View {
             TextField("Track", text: $trackText)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { Task { await search() } }
+            if file.category != .singles {
+                TextField("Album", text: $albumText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await search() } }
+            }
             Button("Search") { Task { await search() } }
                 .disabled(discogsToken.isEmpty)
         }
@@ -237,6 +244,7 @@ private struct DiscogsTabView: View {
             results = try await DiscogsClient.search(
                 artist: artistText.trimmingCharacters(in: .whitespacesAndNewlines),
                 track: trackText.trimmingCharacters(in: .whitespacesAndNewlines),
+                album: albumText.trimmingCharacters(in: .whitespacesAndNewlines),
                 token: discogsToken)
         } catch {
             errorMessage = error.localizedDescription
@@ -559,6 +567,7 @@ private struct MusicBrainzTabView: View {
     @State private var selectedRecording: MusicBrainzRecording?
     @State private var artistText = ""
     @State private var recordingText = ""
+    @State private var albumText = ""
 
     private var query: MusicBrainzQuery { MusicBrainzQuery(for: file) }
 
@@ -575,6 +584,7 @@ private struct MusicBrainzTabView: View {
         .task(id: file.id) {
             artistText = query.artist
             recordingText = query.recording
+            albumText = query.album
             await search()
         }
     }
@@ -608,6 +618,11 @@ private struct MusicBrainzTabView: View {
             TextField("Recording", text: $recordingText)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { Task { await search() } }
+            if file.category != .singles {
+                TextField("Album", text: $albumText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await search() } }
+            }
             Button("Search") { Task { await search() } }
                 .disabled(musicBrainzContact.isEmpty)
         }
@@ -672,6 +687,7 @@ private struct MusicBrainzTabView: View {
             results = try await MusicBrainzClient.searchRecordings(
                 artist: artistText.trimmingCharacters(in: .whitespacesAndNewlines),
                 recording: recordingText.trimmingCharacters(in: .whitespacesAndNewlines),
+                album: albumText.trimmingCharacters(in: .whitespacesAndNewlines),
                 contactEmail: musicBrainzContact)
         } catch {
             errorMessage = error.localizedDescription

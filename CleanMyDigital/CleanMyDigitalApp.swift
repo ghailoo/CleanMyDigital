@@ -35,6 +35,12 @@ struct CleanMyDigitalApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 820, height: 560)
 
+        WindowGroup("Check Album Completeness", id: "check-album-completeness") {
+            AlbumCompletenessSheetView(scanner: scanner)
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 760, height: 520)
+
         Settings {
             SettingsView()
         }

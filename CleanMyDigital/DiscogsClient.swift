@@ -213,19 +213,26 @@ enum DiscogsClient {
     /// stripped, since a mix/edit name Discogs doesn't recognize can shadow
     /// an otherwise-findable release. A thrown error (bad token, rate
     /// limit, network failure) propagates immediately without retrying.
-    static func search(artist: String, track: String, token: String) async throws -> [DiscogsRelease] {
+    ///
+    /// `album`, when non-empty, is sent alongside artist/track as
+    /// `release_title` to narrow the search — useful for Albums/Compilations
+    /// files where the release title is already known from the tag or folder.
+    static func search(artist: String, track: String, album: String = "", token: String) async throws -> [DiscogsRelease] {
         guard !token.isEmpty else { throw DiscogsError.missingToken }
 
-        let results = try await performSearch(artist: artist, track: track, token: token)
+        let results = try await performSearch(artist: artist, track: track, album: album, token: token)
         if !results.isEmpty { return results }
 
         guard let fallbackTrack = MetadataQuery.strippingTrailingParenthetical(from: track) else {
             return results
         }
-        return try await performSearch(artist: artist, track: fallbackTrack, token: token)
+        return try await performSearch(artist: artist, track: fallbackTrack, album: album, token: token)
     }
 
-    private static func performSearch(artist: String, track: String, token: String) async throws -> [DiscogsRelease] {
+    /// Builds the `/database/search` query items for an artist+track(+album)
+    /// lookup — factored out from `performSearch` so the request shape can
+    /// be verified without hitting the network.
+    static func searchURL(artist: String, track: String, album: String) -> URL? {
         var components = URLComponents(string: "https://api.discogs.com/database/search")!
         var queryItems = [
             URLQueryItem(name: "type", value: "release"),
@@ -236,8 +243,49 @@ enum DiscogsClient {
             if !track.isEmpty {
                 queryItems.append(URLQueryItem(name: "track", value: track))
             }
+            if !album.isEmpty {
+                queryItems.append(URLQueryItem(name: "release_title", value: album))
+            }
         } else {
             queryItems.append(URLQueryItem(name: "q", value: track))
+        }
+        components.queryItems = queryItems
+        return components.url
+    }
+
+    private static func performSearch(
+        artist: String, track: String, album: String, token: String
+    ) async throws -> [DiscogsRelease] {
+        guard let url = searchURL(artist: artist, track: track, album: album) else {
+            throw DiscogsError.invalidResponse
+        }
+
+        let data = try await performRequest(makeRequest(url: url, token: token))
+        do {
+            return try JSONDecoder().decode(DiscogsSearchResponse.self, from: data).results
+        } catch {
+            throw DiscogsError.underlying(error)
+        }
+    }
+
+    /// Searches by release/album title instead of by track — used to check
+    /// whether an album folder has its full tracklist, rather than to
+    /// identify a single track.
+    static func searchAlbum(artist: String, album: String, token: String) async throws -> [DiscogsRelease] {
+        guard !token.isEmpty else { throw DiscogsError.missingToken }
+
+        var components = URLComponents(string: "https://api.discogs.com/database/search")!
+        var queryItems = [
+            URLQueryItem(name: "type", value: "release"),
+            URLQueryItem(name: "per_page", value: "10"),
+        ]
+        if !artist.isEmpty {
+            queryItems.append(URLQueryItem(name: "artist", value: artist))
+            if !album.isEmpty {
+                queryItems.append(URLQueryItem(name: "release_title", value: album))
+            }
+        } else {
+            queryItems.append(URLQueryItem(name: "q", value: album))
         }
         components.queryItems = queryItems
 
@@ -311,9 +359,27 @@ enum DiscogsClient {
 struct DiscogsQuery {
     let artist: String
     let track: String
+    /// The file's own Album tag, if present — an initial guess to narrow
+    /// the search on Albums/Compilations files. Empty when the file has no
+    /// Album tag yet, same as `artist`/`track` fall back to an empty guess.
+    let album: String
 
     init(for file: AudioFile) {
         artist = MetadataQuery.artist(for: file)
         track = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
+        album = file.album ?? ""
+    }
+}
+
+/// Derives Discogs search terms for an album-completeness check — same
+/// spirit as `DiscogsQuery`, but keyed on the album/folder rather than a
+/// single track title.
+struct DiscogsAlbumQuery {
+    let artist: String
+    let album: String
+
+    init(for group: AlbumGroup) {
+        artist = group.artist ?? ""
+        album = group.albumTitle ?? group.folderURL.lastPathComponent
     }
 }

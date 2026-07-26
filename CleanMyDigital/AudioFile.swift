@@ -139,6 +139,19 @@ struct AudioFile: Identifiable, Sendable {
     /// real bitrate instead of colliding at zero.
     var bitrateSortKey: Int { bitrateKbps ?? -1 }
 
+    /// True when `name` looks like an album/release folder rather than an
+    /// artist name — this library's album folders reliably encode a
+    /// 4-digit year and/or multiple " - "-separated parts (e.g.
+    /// "2Pac - 1998 - Greatest Hits"), which real artist names essentially
+    /// never do. Used to flag a scan that was likely rooted one level too
+    /// deep — an artist's own album folder scanned directly instead of its
+    /// parent, which makes every file's `expectedArtist` come out as the
+    /// album folder's name instead of the real artist.
+    static func looksLikeAlbumFolderName(_ name: String) -> Bool {
+        if name.range(of: #"(19|20)\d{2}"#, options: .regularExpression) != nil { return true }
+        return name.components(separatedBy: " - ").count >= 3
+    }
+
     /// A copy of this file at `newURL` — used after a successful rename, so
     /// the scanner can update its record in place without a full re-scan.
     func renamed(to newURL: URL) -> AudioFile {

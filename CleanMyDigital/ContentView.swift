@@ -187,6 +187,10 @@ struct ContentView: View {
 
     private var resultsTable: some View {
         VStack(spacing: 0) {
+            if let example = scanner.misrootedArtistFolderExample {
+                misrootedFolderWarningBanner(example: example)
+                Divider()
+            }
             summaryBar
             Divider()
             if filteredFiles.isEmpty {
@@ -199,6 +203,26 @@ struct ContentView: View {
                 table
             }
         }
+    }
+
+    /// Warns when the scanned folder looks like it was rooted one level too
+    /// deep — e.g. `/Volumes/Albums/2Pac/` (an artist's own album folder)
+    /// scanned directly instead of its parent `/Volumes/Albums/`. Recomputed
+    /// live from `scanner.misrootedArtistFolderExample`, so it disappears on
+    /// its own once a correct rescan replaces `scanner.files` — no dismiss
+    /// button needed.
+    private func misrootedFolderWarningBanner(example: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            Text("This scan's expected artist folder (\"\(example)\") looks like an album name, not an artist name — you may have scanned an album folder directly instead of its parent. Try rescanning one level up.")
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.yellow.opacity(0.15))
     }
 
     private var summaryBar: some View {
@@ -512,26 +536,35 @@ struct ContentView: View {
             .disabled(scanner.files.isEmpty)
             .help("Group each Singles track's mixes into a subfolder named after the release")
         }
-        ToolbarItem {
-            Button("Find Duplicates…", systemImage: "doc.on.doc") {
-                openWindow(id: "find-duplicates")
-            }
-            .disabled(scanner.files.isEmpty)
-            .help("Find files sharing the same Artist and Title, and move the lower-quality copy aside")
-        }
-        ToolbarItem {
-            Button(scanner.isAnalyzingSpectrum ? "Stop" : "Check for Transcodes",
-                   systemImage: scanner.isAnalyzingSpectrum ? "stop.fill" : "waveform.badge.exclamationmark") {
-                if scanner.isAnalyzingSpectrum {
-                    scanner.cancelSpectrumAnalysis()
-                } else {
-                    scanner.analyzeSpectrum()
+        Group {
+            ToolbarItem {
+                Button("Find Duplicates…", systemImage: "doc.on.doc") {
+                    openWindow(id: "find-duplicates")
                 }
+                .disabled(scanner.files.isEmpty)
+                .help("Find files sharing the same Artist and Title, and move the lower-quality copy aside")
             }
-            .disabled(!scanner.isAnalyzingSpectrum && scanner.files.isEmpty)
-            .help(scanner.isAnalyzingSpectrum
-                  ? "Stop the spectral analysis — cutoffs measured so far are kept"
-                  : "Measure each file's real frequency cutoff to flag likely transcoded/fake-quality files")
+            ToolbarItem {
+                Button("Check Album Completeness…", systemImage: "checklist") {
+                    openWindow(id: "check-album-completeness")
+                }
+                .disabled(scanner.files.isEmpty || scanner.category != .albums)
+                .help("Check whether each scanned album folder has its full tracklist")
+            }
+            ToolbarItem {
+                Button(scanner.isAnalyzingSpectrum ? "Stop" : "Check for Transcodes",
+                       systemImage: scanner.isAnalyzingSpectrum ? "stop.fill" : "waveform.badge.exclamationmark") {
+                    if scanner.isAnalyzingSpectrum {
+                        scanner.cancelSpectrumAnalysis()
+                    } else {
+                        scanner.analyzeSpectrum()
+                    }
+                }
+                .disabled(!scanner.isAnalyzingSpectrum && scanner.files.isEmpty)
+                .help(scanner.isAnalyzingSpectrum
+                      ? "Stop the spectral analysis — cutoffs measured so far are kept"
+                      : "Measure each file's real frequency cutoff to flag likely transcoded/fake-quality files")
+            }
         }
     }
 

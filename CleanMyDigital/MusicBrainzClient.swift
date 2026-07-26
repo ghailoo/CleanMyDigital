@@ -133,31 +133,48 @@ enum MusicBrainzClient {
     /// zero results, retries once with a trailing "(Mix)"-style
     /// parenthetical stripped. A thrown error propagates immediately
     /// without retrying.
+    ///
+    /// `album`, when non-empty, is added as a `release:"..."` Lucene term
+    /// alongside artist/recording to narrow the search — useful for
+    /// Albums/Compilations files where the release title is already known.
     static func searchRecordings(
-        artist: String, recording: String, contactEmail: String
+        artist: String, recording: String, album: String = "", contactEmail: String
     ) async throws -> [MusicBrainzRecording] {
         guard !contactEmail.isEmpty else { throw MusicBrainzError.missingContact }
 
-        let results = try await performSearch(artist: artist, recording: recording, contactEmail: contactEmail)
+        let results = try await performSearch(
+            artist: artist, recording: recording, album: album, contactEmail: contactEmail)
         if !results.isEmpty { return results }
 
         guard let fallbackRecording = MetadataQuery.strippingTrailingParenthetical(from: recording) else {
             return results
         }
-        return try await performSearch(artist: artist, recording: fallbackRecording, contactEmail: contactEmail)
+        return try await performSearch(
+            artist: artist, recording: fallbackRecording, album: album, contactEmail: contactEmail)
     }
 
-    private static func performSearch(
-        artist: String, recording: String, contactEmail: String
-    ) async throws -> [MusicBrainzRecording] {
+    /// Builds the Lucene query string for an artist+recording(+album)
+    /// search — factored out from `performSearch` so the query shape can be
+    /// verified without hitting the network. Nil when every term is empty.
+    static func searchQuery(artist: String, recording: String, album: String) -> String? {
         var queryParts: [String] = []
         if !artist.isEmpty { queryParts.append("artist:\"\(escape(artist))\"") }
         if !recording.isEmpty { queryParts.append("recording:\"\(escape(recording))\"") }
-        guard !queryParts.isEmpty else { throw MusicBrainzError.invalidResponse }
+        if !album.isEmpty { queryParts.append("release:\"\(escape(album))\"") }
+        guard !queryParts.isEmpty else { return nil }
+        return queryParts.joined(separator: " AND ")
+    }
+
+    private static func performSearch(
+        artist: String, recording: String, album: String, contactEmail: String
+    ) async throws -> [MusicBrainzRecording] {
+        guard let query = searchQuery(artist: artist, recording: recording, album: album) else {
+            throw MusicBrainzError.invalidResponse
+        }
 
         var components = URLComponents(string: "https://musicbrainz.org/ws/2/recording")!
         components.queryItems = [
-            URLQueryItem(name: "query", value: queryParts.joined(separator: " AND ")),
+            URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "fmt", value: "json"),
             URLQueryItem(name: "limit", value: "10"),
         ]
@@ -216,9 +233,14 @@ enum MusicBrainzClient {
 struct MusicBrainzQuery {
     let artist: String
     let recording: String
+    /// The file's own Album tag, if present — an initial guess to narrow
+    /// the search on Albums/Compilations files. Empty when the file has no
+    /// Album tag yet, same as `artist`/`recording` fall back to an empty guess.
+    let album: String
 
     init(for file: AudioFile) {
         artist = MetadataQuery.artist(for: file)
         recording = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
+        album = file.album ?? ""
     }
 }

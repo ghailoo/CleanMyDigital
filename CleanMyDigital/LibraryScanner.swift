@@ -82,6 +82,36 @@ final class LibraryScanner {
         totalCount > 0 ? Double(scannedCount) / Double(totalCount) : 0
     }
 
+    /// Distinct expected-artist folder names among the current scan's
+    /// files, in first-seen order.
+    private var distinctExpectedArtists: [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for file in files {
+            guard let expectedArtist = file.expectedArtist, seen.insert(expectedArtist).inserted else { continue }
+            ordered.append(expectedArtist)
+        }
+        return ordered
+    }
+
+    /// True when at least one distinct expected-artist folder name in this
+    /// Albums scan looks like an album name rather than an artist name
+    /// (see `AudioFile.looksLikeAlbumFolderName`) — usually means the
+    /// scanned folder was an artist's own album folder, scanned directly
+    /// instead of its parent, so every file's `expectedArtist` came out as
+    /// the album name instead of the real artist.
+    var possibleArtistFolderMismatch: Bool {
+        category == .albums && distinctExpectedArtists.contains { AudioFile.looksLikeAlbumFolderName($0) }
+    }
+
+    /// The first expected-artist folder name that triggered
+    /// `possibleArtistFolderMismatch`, for the results banner's example
+    /// text. Nil whenever that flag is false.
+    var misrootedArtistFolderExample: String? {
+        guard category == .albums else { return nil }
+        return distinctExpectedArtists.first { AudioFile.looksLikeAlbumFolderName($0) }
+    }
+
     func scan(folder: URL, category: LibraryCategory) async {
         let didAccess = folder.startAccessingSecurityScopedResource()
         defer { if didAccess { folder.stopAccessingSecurityScopedResource() } }
@@ -641,9 +671,8 @@ final class LibraryScanner {
                     avFoundation: await stringValue(in: items, common: nil,
                                                      keys: ["TCON", "©gen", "gnre", "genre", "GENRE"]),
                     native: native?.genre),
-                trackNumber: mergedValue(
-                    avFoundation: await stringValue(in: items, common: nil,
-                                                     keys: ["TRCK", "trkn", "tracknumber", "TRACKNUMBER"]),
+                trackNumber: mergedTrackNumber(
+                    avFoundation: await trackNumberValue(in: items),
                     native: native?.trackNumber),
                 category: category,
                 expectedArtist: expectedArtist,
@@ -688,6 +717,16 @@ final class LibraryScanner {
         return nil
     }
 
+    /// Same precedence as `mergedValue`, except a native "x/y" reading (a
+    /// position combined with a total count AVFoundation's own metadata
+    /// doesn't carry — e.g. a FLAC's separate TRACKTOTAL comment) always
+    /// wins, since it's strictly more complete than AVFoundation's
+    /// position-only string.
+    nonisolated private static func mergedTrackNumber(avFoundation: String?, native: String?) -> String? {
+        if let native, native.contains("/") { return native }
+        return mergedValue(avFoundation: avFoundation, native: native)
+    }
+
     nonisolated private static func stringValue(
         in items: [AVMetadataItem],
         common identifier: AVMetadataIdentifier?,
@@ -707,6 +746,41 @@ final class LibraryScanner {
             }
         }
         return nil
+    }
+
+    /// The `trkn` iTunes atom is packed binary (2 bytes padding, 2 bytes
+    /// track number, 2 bytes total tracks, 2 bytes padding — see
+    /// `M4ATagWriter`), so it doesn't reliably surface through
+    /// `.stringValue` at all: confirmed empirically that AVFoundation
+    /// reports this item's raw `.key` as a numeric FourCharCode rather than
+    /// the string "trkn", so the generic key-string matching `stringValue`
+    /// uses below never finds it, total or no total. Matched here by its
+    /// `.iTunesMetadataTrackNumber` identifier instead, and decoded
+    /// directly from `.dataValue`. Falls back to the string-based lookup
+    /// for every other format (MP3's "x/y" TRCK text, FLAC/other trkn-less
+    /// files).
+    nonisolated private static func trackNumberValue(in items: [AVMetadataItem]) async -> String? {
+        let trknItems = AVMetadataItem.metadataItems(from: items, filteredByIdentifier: .iTunesMetadataTrackNumber)
+        for item in trknItems {
+            if let data = try? await item.load(.dataValue), let decoded = decodeTrknAtom(data) {
+                return decoded
+            }
+        }
+        return await stringValue(in: items, common: nil,
+                                  keys: ["TRCK", "trkn", "tracknumber", "TRACKNUMBER"])
+    }
+
+    /// Decodes a `trkn` atom into "x" or "x/y" depending on whether it
+    /// carries a nonzero total. Nil only when there's no usable track
+    /// number at all, so the caller falls back to the string-based reading.
+    nonisolated private static func decodeTrknAtom(_ data: Data) -> String? {
+        guard data.count >= 4 else { return nil }
+        let bytes = [UInt8](data)
+        let track = Int(bytes[2]) << 8 | Int(bytes[3])
+        guard track > 0 else { return nil }
+        guard data.count >= 6 else { return "\(track)" }
+        let total = Int(bytes[4]) << 8 | Int(bytes[5])
+        return total > 0 ? "\(track)/\(total)" : "\(track)"
     }
 
     /// Table thumbnails render at 24pt; 64px covers up to 3x Retina scaling
