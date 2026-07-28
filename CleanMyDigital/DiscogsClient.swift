@@ -142,6 +142,12 @@ struct DiscogsReleaseDetail: Decodable, Sendable {
     /// Case/diacritic-insensitive contains match, in either direction,
     /// between a tracklist title and the cleaned filename. Falls back to
     /// nil so the caller can let the user pick manually.
+    ///
+    /// Used to fill a *single* file's Title/Track Number tag, where one
+    /// file can only hold one title — for that, one best match is correct
+    /// and this should keep returning exactly one. For crediting a combined
+    /// audio file against *every* track it plausibly covers, see
+    /// `allMatchedTracks(for:)` instead.
     func autoMatchedTrack(for cleanedFileName: String) -> DiscogsTrack? {
         let normalizedFile = Self.normalize(cleanedFileName)
         guard !normalizedFile.isEmpty else { return nil }
@@ -151,6 +157,56 @@ struct DiscogsReleaseDetail: Decodable, Sendable {
             return normalizedTrack.contains(normalizedFile) || normalizedFile.contains(normalizedTrack)
         }
     }
+
+    /// Every track this cleaned filename plausibly covers: the same single
+    /// best match `autoMatchedTrack(for:)` would find, plus any *other*
+    /// track whose normalized title is itself a substring of the cleaned
+    /// filename — the "file contains track" direction only (not the
+    /// reverse `autoMatchedTrack` also checks), since this exists to credit
+    /// a combined/segued rip like "06 - Misterio - Interlude.flac" for
+    /// covering both a "Mistério" and a separate "Interlude" track
+    /// concatenated into its name, not to find a single track a short
+    /// filename happens to be an abbreviation of.
+    ///
+    /// Two guards keep this from over-matching on coincidental substrings:
+    /// - Nothing is returned at all unless the file already has a primary
+    ///   match via `autoMatchedTrack(for:)` — this scopes the search to
+    ///   files already reasonably confident to belong to this release,
+    ///   rather than substring-matching every track against every file in
+    ///   the album regardless of whether anything matched to begin with.
+    /// - Beyond that primary match, only tracks with a normalized title of
+    ///   at least `minimumSupplementaryMatchLength` characters are
+    ///   considered, so a short/generic title (e.g. "Love") can't tack
+    ///   itself on as a substring of an unrelated word elsewhere in the
+    ///   filename.
+    ///
+    /// Only ever used for the album-completeness "what's covered" check —
+    /// never for filling tags, where `autoMatchedTrack(for:)`'s single-match
+    /// behavior is what's wanted and stays unchanged.
+    func allMatchedTracks(for cleanedFileName: String) -> [DiscogsTrack] {
+        guard let primary = autoMatchedTrack(for: cleanedFileName) else { return [] }
+        let normalizedFile = Self.normalize(cleanedFileName)
+        guard !normalizedFile.isEmpty else { return [primary] }
+
+        let supplementary = tracks.filter { track in
+            guard track.id != primary.id else { return false }
+            let normalizedTrack = Self.normalize(track.title)
+            guard normalizedTrack.count >= Self.minimumSupplementaryMatchLength else { return false }
+            return normalizedFile.contains(normalizedTrack)
+        }
+        return [primary] + supplementary
+    }
+
+    /// Below this normalized length, a track title is common/generic enough
+    /// (e.g. "Love", "Go") that treating its mere appearance as a substring
+    /// of some other file's name as a real match would produce far more
+    /// false positives than genuine combined-track credits. Deliberately
+    /// excludes 4-letter titles too ("Love" itself included) — for this
+    /// bonus-credit path, erring toward under-crediting (a real compound
+    /// match reads as "possibly missing" instead) is safer than the
+    /// alternative failure mode this feature exists to fix: silently
+    /// marking an album complete when it isn't.
+    private static let minimumSupplementaryMatchLength = 5
 
     private static func normalize(_ string: String) -> String {
         string.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
@@ -164,6 +220,15 @@ struct DiscogsTrack: Identifiable, Hashable, Sendable {
     let duration: String?
 
     var id: String { position + "|" + title }
+}
+
+extension [DiscogsTrack] {
+    /// Titles of the tracks in this list with no corresponding entry among
+    /// `matchedTrackIDs` — used to determine whether a release's tracklist
+    /// is fully covered by an album's locally matched files.
+    func missingTitles(matchedTrackIDs: Set<String>) -> [String] {
+        filter { !matchedTrackIDs.contains($0.id) }.map(\.title)
+    }
 }
 
 /// Caches release details in memory for the app's lifetime so revisiting a

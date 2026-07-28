@@ -40,6 +40,11 @@ final class LibraryScanner {
     private(set) var totalCount = 0
     private(set) var scannedFolder: URL?
     private(set) var category: LibraryCategory?
+    /// A fixed artist name to use for every file instead of computing it
+    /// from folder depth — set via `scan(folder:category:artistOverride:)`
+    /// for the "treat this folder as the artist" scan mode. Nil means
+    /// `expectedArtist(for:in:)`'s normal folder-depth calculation applies.
+    private(set) var artistOverride: String?
 
     /// Batch "Find All Metadata" results, keyed by file URL. Session-only —
     /// cleared whenever a new scan starts.
@@ -58,6 +63,14 @@ final class LibraryScanner {
     private(set) var spectralTotalCount = 0
 
     private var spectralTask: Task<Void, Never>?
+
+    /// Online (Discogs) completeness confirmations, keyed by album folder
+    /// URL. Session-only — cleared whenever a new scan starts. Set via
+    /// `recordAlbumCompletenessResult(_:for:)` once a release's tracklist
+    /// has been compared against an album's local files, so
+    /// `AlbumCompletenessSheetView` can show a confirmed result instead of
+    /// "Unknown locally" forever.
+    private(set) var albumCompletenessResults: [URL: AlbumCompletenessOnlineResult] = [:]
 
     /// The most recent batch of file moves, oldest first — renames and
     /// "Collect into Folders" moves share this same slot, since both are
@@ -99,20 +112,28 @@ final class LibraryScanner {
     /// (see `AudioFile.looksLikeAlbumFolderName`) — usually means the
     /// scanned folder was an artist's own album folder, scanned directly
     /// instead of its parent, so every file's `expectedArtist` came out as
-    /// the album name instead of the real artist.
+    /// the album name instead of the real artist. Always false once
+    /// `artistOverride` is set — the user has explicitly confirmed intent,
+    /// so there's nothing left to warn about.
     var possibleArtistFolderMismatch: Bool {
-        category == .albums && distinctExpectedArtists.contains { AudioFile.looksLikeAlbumFolderName($0) }
+        guard artistOverride == nil else { return false }
+        return category == .albums && distinctExpectedArtists.contains { AudioFile.looksLikeAlbumFolderName($0) }
     }
 
     /// The first expected-artist folder name that triggered
     /// `possibleArtistFolderMismatch`, for the results banner's example
     /// text. Nil whenever that flag is false.
     var misrootedArtistFolderExample: String? {
-        guard category == .albums else { return nil }
+        guard artistOverride == nil, category == .albums else { return nil }
         return distinctExpectedArtists.first { AudioFile.looksLikeAlbumFolderName($0) }
     }
 
-    func scan(folder: URL, category: LibraryCategory) async {
+    /// Scans `folder` for audio files. `artistOverride`, when non-nil and
+    /// `category == .albums`, is used as every file's `expectedArtist`
+    /// instead of the usual folder-depth calculation — for scanning an
+    /// artist's own folder directly (`ArtistFolder/AlbumName/Track.ext`)
+    /// rather than a parent folder containing multiple artist folders.
+    func scan(folder: URL, category: LibraryCategory, artistOverride: String? = nil) async {
         let didAccess = folder.startAccessingSecurityScopedResource()
         defer { if didAccess { folder.stopAccessingSecurityScopedResource() } }
 
@@ -122,6 +143,7 @@ final class LibraryScanner {
         totalCount = 0
         scannedFolder = folder
         self.category = category
+        self.artistOverride = artistOverride
 
         lookupTask?.cancel()
         lookupTask = nil
@@ -136,6 +158,8 @@ final class LibraryScanner {
         isAnalyzingSpectrum = false
         spectralCompletedCount = 0
         spectralTotalCount = 0
+
+        albumCompletenessResults = [:]
 
         lastRenameBatch = []
 
@@ -156,7 +180,7 @@ final class LibraryScanner {
             var inFlight = 0
 
             while inFlight < maxConcurrent, let url = iterator.next() {
-                let expected = Self.expectedArtist(for: url, in: folder)
+                let expected = Self.expectedArtist(for: url, in: folder, override: artistOverride, category: category)
                 group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 inFlight += 1
             }
@@ -164,7 +188,7 @@ final class LibraryScanner {
                 results.append(file)
                 scannedCount += 1
                 if let url = iterator.next() {
-                    let expected = Self.expectedArtist(for: url, in: folder)
+                    let expected = Self.expectedArtist(for: url, in: folder, override: artistOverride, category: category)
                     group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 }
             }
@@ -180,11 +204,21 @@ final class LibraryScanner {
     /// requested, then re-reads the file and updates `files` in place so
     /// the table reflects the change immediately.
     ///
+    /// A failed backup does *not* abort the write — refusing a metadata fix
+    /// the user actually wants over an unrelated backup problem (e.g. a
+    /// permission quirk creating a new folder on a network volume) is worse
+    /// than writing without a backup and telling them so. Returns the
+    /// backup failure, if any, instead of throwing it, so the caller can
+    /// still tell "applied, but not backed up" apart from "applied
+    /// cleanly." Nil means backup succeeded or wasn't requested. A thrown
+    /// error is always the tag write itself failing.
+    ///
     /// `scan(folder:)` releases its security-scoped access to the folder as
     /// soon as the scan finishes, so writes re-acquire it for the duration
     /// of the operation — access extends to the whole subtree the folder
     /// covers, including this file.
-    func applyTagChanges(_ changes: TagChanges, to file: AudioFile, backupFirst: Bool) async throws {
+    @discardableResult
+    func applyTagChanges(_ changes: TagChanges, to file: AudioFile, backupFirst: Bool) async throws -> TagWriteError? {
         guard let scannedFolder else {
             throw TagWriteError.underlying(CocoaError(.fileNoSuchFile))
         }
@@ -192,18 +226,34 @@ final class LibraryScanner {
         let didAccess = scannedFolder.startAccessingSecurityScopedResource()
         defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
 
+        var backupFailure: TagWriteError?
         if backupFirst {
-            try BackupManager.backupIfNeeded(fileURL: file.url, root: scannedFolder)
+            do {
+                try BackupManager.backupIfNeeded(fileURL: file.url, root: scannedFolder)
+            } catch {
+                backupFailure = .backupFailed(error)
+            }
         }
 
         try await TagWriterRouter.write(changes, to: file.url)
 
-        let expected = Self.expectedArtist(for: file.url, in: scannedFolder)
+        let expected = Self.expectedArtist(
+            for: file.url, in: scannedFolder, override: artistOverride, category: file.category)
         let updated = await Self.inspect(file.url, expectedArtist: expected, category: file.category)
         if let index = files.firstIndex(where: { $0.url == file.url }) {
             files[index] = updated
         }
         lookupResults.removeValue(forKey: file.url)
+
+        return backupFailure
+    }
+
+    /// Records the result of comparing a Discogs release's tracklist
+    /// against `folderURL`'s scanned files. Called from
+    /// `AlbumComparisonView.loadDetail()` once it's determined whether
+    /// every track in the release was matched to a local file.
+    func recordAlbumCompletenessResult(_ result: AlbumCompletenessOnlineResult, for folderURL: URL) {
+        albumCompletenessResults[folderURL] = result
     }
 
     /// Renames each proposal's file via `FileManager.moveItem`, inside the
@@ -579,7 +629,17 @@ final class LibraryScanner {
     /// The first path component of `url` under `folder` — the "ArtistName"
     /// folder Singles & Albums are organized by. Nil if `url` sits directly
     /// in `folder` with no intervening subfolder.
-    nonisolated private static func expectedArtist(for url: URL, in folder: URL) -> String? {
+    ///
+    /// When `override` is non-nil and `category == .albums`, it's returned
+    /// directly instead — the "treat this folder as the artist" scan mode,
+    /// for scanning an artist's own folder (`ArtistFolder/AlbumName/Track`)
+    /// where the folder-depth calculation below would otherwise mistake the
+    /// first album subfolder for the artist.
+    nonisolated private static func expectedArtist(
+        for url: URL, in folder: URL, override: String?, category: LibraryCategory
+    ) -> String? {
+        if category == .albums, let override { return override }
+
         let rootComponents = folder.standardizedFileURL.pathComponents
         let fileComponents = url.standardizedFileURL.pathComponents
         guard fileComponents.count > rootComponents.count + 1,

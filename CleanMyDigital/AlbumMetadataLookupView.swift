@@ -192,8 +192,22 @@ private struct AlbumComparisonView: View {
     @State private var detailErrorMessage: String?
     @State private var matchedTracks: [URL: DiscogsTrack] = [:]
 
+    /// The result of trying to apply changes to one file — distinguishes a
+    /// file that failed to write from one that had nothing to write in the
+    /// first place (every field this release would fill was already
+    /// present), which "the write failed" would otherwise misreport. Also
+    /// distinguishes a clean apply from one that wrote successfully but
+    /// couldn't back up the original first (backup failures don't block
+    /// the write — see `LibraryScanner.applyTagChanges`).
+    enum ApplyOutcome {
+        case applied
+        case appliedWithoutBackup(String)
+        case alreadyComplete
+        case failed(String)
+    }
+
     @State private var isApplying = false
-    @State private var errorsByURL: [URL: String] = [:]
+    @State private var outcomesByURL: [URL: ApplyOutcome] = [:]
     @State private var applySummary: String?
 
     private var query: DiscogsAlbumQuery { DiscogsAlbumQuery(for: group) }
@@ -356,12 +370,30 @@ private struct AlbumComparisonView: View {
             if let applySummary {
                 Text(applySummary).font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(group.files.filter { errorsByURL[$0.url] != nil }) { file in
-                Label("\(file.fileName): \(errorsByURL[file.url] ?? "")",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.red)
+            ForEach(group.files) { file in
+                outcomeLabel(for: file)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func outcomeLabel(for file: AudioFile) -> some View {
+        switch outcomesByURL[file.url] {
+        case .applied, nil:
+            EmptyView()
+        case .appliedWithoutBackup(let message):
+            Label("\(file.fileName): applied, but backup failed — \(message)",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        case .alreadyComplete:
+            Label("\(file.fileName): already complete — nothing to fill", systemImage: "checkmark.circle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        case .failed(let message):
+            Label("\(file.fileName): \(message)", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(.red)
         }
     }
 
@@ -399,7 +431,7 @@ private struct AlbumComparisonView: View {
     private func applyToAlbum() async {
         isApplying = true
         defer { isApplying = false }
-        errorsByURL = [:]
+        outcomesByURL = [:]
 
         var artworkData: Data?
         let needsArtwork = group.files.contains { $0.missingFields.contains(.artwork) }
@@ -409,6 +441,8 @@ private struct AlbumComparisonView: View {
         }
 
         var appliedCount = 0
+        var appliedWithoutBackupCount = 0
+        var alreadyCompleteCount = 0
         var failedCount = 0
 
         for file in group.files {
@@ -428,19 +462,78 @@ private struct AlbumComparisonView: View {
                 if missing.contains(.trackNumber) { changes.trackNumber = matched.position }
             }
 
-            guard !changes.isEmpty else { continue }
+            guard !changes.isEmpty else {
+                outcomesByURL[file.url] = .alreadyComplete
+                alreadyCompleteCount += 1
+                continue
+            }
 
             do {
-                try await scanner.applyTagChanges(changes, to: file, backupFirst: backupOriginalsBeforeWriting)
+                let backupFailure = try await scanner.applyTagChanges(
+                    changes, to: file, backupFirst: backupOriginalsBeforeWriting)
+                if let backupFailure {
+                    outcomesByURL[file.url] = .appliedWithoutBackup(backupFailure.localizedDescription)
+                    appliedWithoutBackupCount += 1
+                } else {
+                    outcomesByURL[file.url] = .applied
+                }
                 appliedCount += 1
             } catch {
-                errorsByURL[file.url] = error.localizedDescription
+                outcomesByURL[file.url] = .failed(error.localizedDescription)
                 failedCount += 1
             }
         }
 
-        applySummary = failedCount == 0
-            ? "Applied changes to \(appliedCount) of \(group.files.count) file(s)."
-            : "Applied to \(appliedCount), \(failedCount) failed."
+        applySummary = Self.applySummaryText(
+            applied: appliedCount, appliedWithoutBackup: appliedWithoutBackupCount,
+            alreadyComplete: alreadyCompleteCount, failed: failedCount, total: group.files.count)
+
+        recordAlbumCompletenessResult()
+    }
+
+    /// Records whether this release's tracklist fully covers the album's
+    /// files. Deliberately only called from here, not from `loadDetail()` —
+    /// merely viewing/comparing a candidate release shouldn't permanently
+    /// mark the album confirmed if the user backs out without ever clicking
+    /// Apply. A tracklist to compare against is required — an empty one
+    /// just means Discogs has no track data for this release, not that the
+    /// album is confirmed complete.
+    ///
+    /// Uses `allMatchedTracks(for:)` — every track each file plausibly
+    /// covers, unioned across the whole album — rather than the one-to-one
+    /// `matchedTracks` used for tag-filling/display. A single combined rip
+    /// (e.g. "06 - Misterio - Interlude.flac") can legitimately cover more
+    /// than one shorter track title concatenated into its name; `matchedTracks`
+    /// can only ever hold one, which would falsely flag the other as missing.
+    private func recordAlbumCompletenessResult() {
+        guard let releaseDetail, !releaseDetail.tracks.isEmpty else { return }
+
+        var coveredIDs: Set<String> = []
+        for file in group.files {
+            let cleaned = MetadataQuery.cleanedTrackTitle(
+                from: file.fileName, artist: query.artist, category: .albums)
+            coveredIDs.formUnion(releaseDetail.allMatchedTracks(for: cleaned).map(\.id))
+        }
+
+        let missingTitles = releaseDetail.tracks.missingTitles(matchedTrackIDs: coveredIDs)
+        let onlineResult: AlbumCompletenessOnlineResult = missingTitles.isEmpty
+            ? .confirmedComplete
+            : .missingTracks(missingTitles)
+        scanner.recordAlbumCompletenessResult(onlineResult, for: group.folderURL)
+    }
+
+    /// "Applied to X of Y file(s)" plus whichever of
+    /// without-backup/already-complete/failed counts are nonzero — the base
+    /// wording always distinguishes applied from not-applied; the
+    /// append-on details cover *why* the rest weren't, or what's worth a
+    /// second look even among the applied ones.
+    private static func applySummaryText(
+        applied: Int, appliedWithoutBackup: Int, alreadyComplete: Int, failed: Int, total: Int
+    ) -> String {
+        var parts = ["Applied to \(applied) of \(total) file(s)"]
+        if appliedWithoutBackup > 0 { parts.append("\(appliedWithoutBackup) without a backup") }
+        if alreadyComplete > 0 { parts.append("\(alreadyComplete) already complete") }
+        if failed > 0 { parts.append("\(failed) failed") }
+        return parts.joined(separator: ", ") + "."
     }
 }

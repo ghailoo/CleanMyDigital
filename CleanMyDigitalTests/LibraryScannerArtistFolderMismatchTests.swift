@@ -45,6 +45,22 @@ struct LibraryScannerArtistFolderMismatchTests {
         #expect(scanner.misrootedArtistFolderExample == nil)
     }
 
+    @Test func artistOverrideSuppressesTheMismatchWarning() async throws {
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let albumLikeFolder = folder.appendingPathComponent("2Pac - 1998 - Greatest Hits (Bootleg)")
+        try FileManager.default.createDirectory(at: albumLikeFolder, withIntermediateDirectories: true)
+        try Data().write(to: albumLikeFolder.appendingPathComponent("track.mp3"))
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: folder, category: .albums, artistOverride: folder.lastPathComponent)
+
+        #expect(!scanner.possibleArtistFolderMismatch)
+        #expect(scanner.misrootedArtistFolderExample == nil)
+        #expect(scanner.files.first?.expectedArtist == folder.lastPathComponent)
+    }
+
     @Test func doesNotFlagOutsideOfAlbumsCategoryEvenWithAnAlbumLikeFolderName() async throws {
         let folder = try Self.makeTempFolder()
         defer { try? FileManager.default.removeItem(at: folder) }

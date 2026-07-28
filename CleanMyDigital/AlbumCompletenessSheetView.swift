@@ -92,8 +92,35 @@ struct AlbumCompletenessSheetView: View {
         return "\(group.files.count) / ?"
     }
 
+    /// An online (Discogs) result, once one's been recorded for this
+    /// folder, always wins over the local tag-based status — it reflects
+    /// an actual confirmed comparison, not just a guess from track-number
+    /// tags. Falls back to `localStatusView` only when there's no online
+    /// result yet.
     @ViewBuilder
     private func statusView(for group: AlbumGroup) -> some View {
+        if let onlineResult = scanner.albumCompletenessResults[group.folderURL] {
+            onlineStatusView(onlineResult, for: group)
+        } else {
+            localStatusView(for: group)
+        }
+    }
+
+    @ViewBuilder
+    private func onlineStatusView(_ result: AlbumCompletenessOnlineResult, for group: AlbumGroup) -> some View {
+        switch result {
+        case .confirmedComplete:
+            badge("Complete (confirmed via Discogs)", color: .green)
+        case .missingTracks(let titles):
+            VStack(alignment: .leading, spacing: 4) {
+                badge(missingTracksLabel(titles), color: .orange)
+                checkOnlineButton(group)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func localStatusView(for group: AlbumGroup) -> some View {
         switch group.localStatus {
         case .completeLocally:
             badge("Complete", color: .green)
@@ -129,6 +156,11 @@ struct AlbumCompletenessSheetView: View {
         guard !positions.isEmpty else { return "Missing \(count) track(s)" }
         let list = positions.map(String.init).joined(separator: ", ")
         return "Missing track\(count == 1 ? "" : "s") \(list)"
+    }
+
+    private func missingTracksLabel(_ titles: [String]) -> String {
+        guard !titles.isEmpty else { return "Missing tracks" }
+        return "Missing: \(titles.joined(separator: ", "))"
     }
 
     private var footer: some View {

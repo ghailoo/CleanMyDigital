@@ -9,6 +9,24 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 struct ContentView: View {
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -210,19 +228,38 @@ struct ContentView: View {
     /// scanned directly instead of its parent `/Volumes/Albums/`. Recomputed
     /// live from `scanner.misrootedArtistFolderExample`, so it disappears on
     /// its own once a correct rescan replaces `scanner.files` — no dismiss
-    /// button needed.
+    /// button needed. The "Treat as the artist" button is the one-click fix
+    /// for exactly this scenario: it re-scans the same folder with
+    /// `artistOverride` set to the folder's own name, which also makes this
+    /// banner stop showing (`possibleArtistFolderMismatch` reads false once
+    /// an override is set).
     private func misrootedFolderWarningBanner(example: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
-            Text("This scan's expected artist folder (\"\(example)\") looks like an album name, not an artist name — you may have scanned an album folder directly instead of its parent. Try rescanning one level up.")
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("This scan's expected artist folder (\"\(example)\") looks like an album name, not an artist name — you may have scanned an album folder directly instead of its parent. Try rescanning one level up.")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let folder = scanner.scannedFolder {
+                    Button("Treat \"\(folder.lastPathComponent)\" as the Artist") {
+                        treatScannedFolderAsArtist(folder)
+                    }
+                    .controlSize(.small)
+                }
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color.yellow.opacity(0.15))
+    }
+
+    private func treatScannedFolderAsArtist(_ folder: URL) {
+        let category = scanner.category ?? selectedCategory
+        Task {
+            await scanner.scan(folder: folder, category: category, artistOverride: folder.lastPathComponent)
+        }
     }
 
     private var summaryBar: some View {
@@ -487,7 +524,10 @@ struct ContentView: View {
         ToolbarItem {
             Button("Rescan", systemImage: "arrow.clockwise") {
                 if let folder = scanner.scannedFolder {
-                    Task { await scanner.scan(folder: folder, category: scanner.category ?? selectedCategory) }
+                    Task {
+                        await scanner.scan(folder: folder, category: scanner.category ?? selectedCategory,
+                                            artistOverride: scanner.artistOverride)
+                    }
                 }
             }
             .disabled(scanner.scannedFolder == nil

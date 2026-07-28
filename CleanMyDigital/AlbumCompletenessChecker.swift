@@ -18,6 +18,17 @@ enum AlbumCompletenessStatus: Sendable, Equatable {
     case unknownLocally
 }
 
+/// The outcome of comparing a Discogs release's tracklist against an
+/// album's scanned files — recorded on `LibraryScanner` (session-only, keyed
+/// by album folder URL) once a candidate release's tracklist has been
+/// compared, so `AlbumCompletenessSheetView` can show a confirmed result
+/// instead of "Unknown locally" forever. See
+/// `LibraryScanner.recordAlbumCompletenessResult(_:for:)`.
+enum AlbumCompletenessOnlineResult: Sendable, Equatable {
+    case confirmedComplete
+    case missingTracks([String])
+}
+
 /// One album folder's files, grouped for a completeness check — files
 /// under `ArtistName/AlbumName/` share a folder, so the folder itself is
 /// the natural grouping key for "is this album whole?"

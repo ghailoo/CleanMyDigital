@@ -58,6 +58,11 @@ private struct ApplyToFileSection: View {
     @AppStorage("backupOriginalsBeforeWriting") private var backupOriginalsBeforeWriting = true
     @State private var isApplying = false
     @State private var outcome: Result<Set<MetadataField>, Error>?
+    /// Set alongside a `.success` outcome when the write went through but
+    /// its backup didn't — backup failures don't block the write (see
+    /// `LibraryScanner.applyTagChanges`), so this is reported separately
+    /// rather than as a write failure.
+    @State private var backupFailureMessage: String?
 
     private var canWriteFormat: Bool { TagWriterRouter.canWrite(fileExtension: file.fileExtension) }
     private var isApplied: Bool {
@@ -90,6 +95,12 @@ private struct ApplyToFileSection: View {
                         .foregroundStyle(.red)
                 }
             }
+            if let backupFailureMessage {
+                Label("Backup failed, so the original wasn't saved: \(backupFailureMessage)",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
@@ -98,8 +109,10 @@ private struct ApplyToFileSection: View {
         defer { isApplying = false }
         do {
             let changes = try await buildChanges()
-            try await scanner.applyTagChanges(changes, to: file, backupFirst: backupOriginalsBeforeWriting)
+            let backupFailure = try await scanner.applyTagChanges(
+                changes, to: file, backupFirst: backupOriginalsBeforeWriting)
             outcome = .success(fillable)
+            backupFailureMessage = backupFailure?.localizedDescription
         } catch {
             outcome = .failure(error)
         }

@@ -29,6 +29,14 @@ enum TagWriteError: LocalizedError {
     case noChanges
     case malformedFile(String)
     case underlying(Error)
+    /// The pre-write backup (see `BackupManager`) couldn't be saved —
+    /// distinguished from `.underlying` so callers can tell "your backup
+    /// didn't save" apart from "your tag write failed" instead of both
+    /// reading as the same generic message. Doesn't block the write itself
+    /// (see `LibraryScanner.applyTagChanges`), so this is returned as a
+    /// value there rather than thrown — kept as a `TagWriteError` case
+    /// purely to reuse this type's message formatting.
+    case backupFailed(Error)
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +48,8 @@ enum TagWriteError: LocalizedError {
             return "This file's tags couldn't be parsed: \(reason)"
         case .underlying(let error):
             return error.localizedDescription
+        case .backupFailed(let error):
+            return "Backup failed: \(error.localizedDescription)"
         }
     }
 }
