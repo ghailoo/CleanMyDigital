@@ -13,11 +13,12 @@ struct DiscogsRelease: Identifiable, Decodable, Sendable {
     let genre: [String]?
     let style: [String]?
     let label: [String]?
+    let format: [String]?
     let thumb: String?
     let coverImage: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, year, genre, style, label, thumb
+        case id, title, year, genre, style, label, format, thumb
         case coverImage = "cover_image"
     }
 
@@ -36,6 +37,12 @@ struct DiscogsRelease: Identifiable, Decodable, Sendable {
 
     var combinedGenre: String {
         ((genre ?? []) + (style ?? [])).joined(separator: ", ")
+    }
+
+    /// The release's physical format(s) — e.g. "Vinyl, LP, Album" — empty
+    /// when Discogs didn't report any.
+    var formattedFormat: String {
+        (format ?? []).joined(separator: ", ")
     }
 
     var thumbURL: URL? { thumb.flatMap(URL.init) }

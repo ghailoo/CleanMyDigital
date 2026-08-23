@@ -16,6 +16,11 @@ struct AlbumCompletenessSheetView: View {
 
     @State private var groups: [AlbumGroup] = []
     @State private var albumLookupGroup: AlbumGroup?
+    @State private var folderRenameProposals: [URL: AlbumFolderRenameProposal] = [:]
+    @State private var pendingRenameProposal: AlbumFolderRenameProposal?
+    @State private var isRenamingFolder = false
+    @State private var renameErrorsByFolder: [URL: String] = [:]
+    @State private var lastFolderChangeSummary: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +36,16 @@ struct AlbumCompletenessSheetView: View {
         .sheet(item: $albumLookupGroup) { group in
             AlbumMetadataLookupView(group: group, scanner: scanner)
                 .onDisappear { rebuild() }
+        }
+        .confirmationDialog(
+            "Rename Folder?",
+            isPresented: Binding(get: { pendingRenameProposal != nil }, set: { if !$0 { pendingRenameProposal = nil } }),
+            presenting: pendingRenameProposal
+        ) { proposal in
+            Button("Rename") { Task { await renameFolder(proposal) } }
+            Button("Cancel", role: .cancel) { pendingRenameProposal = nil }
+        } message: { proposal in
+            Text("\"\(proposal.currentFolderName)\" will be renamed to \"\(proposal.proposedFolderName)\".")
         }
     }
 
@@ -73,6 +88,9 @@ struct AlbumCompletenessSheetView: View {
                 Text(group.artist ?? "Unknown Artist")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let proposal = folderRenameProposals[group.folderURL] {
+                    renameFolderControl(for: proposal)
+                }
             }
             Spacer()
             Text(tracksFoundText(for: group))
@@ -143,6 +161,26 @@ struct AlbumCompletenessSheetView: View {
             .font(.caption2)
     }
 
+    /// A rename proposal shown per-row, folder rename feeling more
+    /// consequential than a per-file tag edit — clicking opens a
+    /// preview-then-confirm dialog (see the `.confirmationDialog` on
+    /// `body`) rather than renaming immediately.
+    private func renameFolderControl(for proposal: AlbumFolderRenameProposal) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button("Rename Folder to \"\(proposal.proposedFolderName)\"…") {
+                pendingRenameProposal = proposal
+            }
+            .buttonStyle(.link)
+            .font(.caption2)
+            .disabled(isRenamingFolder)
+            if let error = renameErrorsByFolder[proposal.group.folderURL] {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
     private func badge(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.caption2.weight(.semibold))
@@ -168,12 +206,51 @@ struct AlbumCompletenessSheetView: View {
             Text("\(groups.count) album(s)")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            if let lastFolderChangeSummary {
+                Text(lastFolderChangeSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
+            if scanner.canUndoLastFileOperation {
+                Button("Undo Last Change") { Task { await undo() } }
+                    .disabled(isRenamingFolder)
+            }
         }
         .padding()
     }
 
     private func rebuild() {
         groups = AlbumCompletenessChecker.groups(for: scanner.files)
+        folderRenameProposals = Dictionary(
+            uniqueKeysWithValues: AlbumFolderRenamePlanner.plan(for: groups).map { ($0.group.folderURL, $0) })
+        renameErrorsByFolder = [:]
+    }
+
+    private func renameFolder(_ proposal: AlbumFolderRenameProposal) async {
+        pendingRenameProposal = nil
+        isRenamingFolder = true
+        defer { isRenamingFolder = false }
+
+        let outcomes = await scanner.renameAlbumFolders([proposal])
+        guard let outcome = outcomes.first else { return }
+        if outcome.succeeded {
+            lastFolderChangeSummary = "Renamed \"\(proposal.currentFolderName)\" to \"\(proposal.proposedFolderName)\"."
+            rebuild()
+        } else {
+            renameErrorsByFolder[proposal.group.folderURL] = outcome.errorDescription
+        }
+    }
+
+    private func undo() async {
+        isRenamingFolder = true
+        defer { isRenamingFolder = false }
+
+        let outcomes = await scanner.undoLastFileOperation()
+        let failedCount = outcomes.count(where: { !$0.succeeded })
+        lastFolderChangeSummary = failedCount == 0
+            ? "Undid \(outcomes.count) change(s)."
+            : "Undid \(outcomes.count - failedCount), \(failedCount) failed."
+        rebuild()
     }
 }

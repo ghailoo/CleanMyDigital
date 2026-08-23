@@ -563,18 +563,27 @@ struct ContentView: View {
                   : "Search Discogs and MusicBrainz for every flagged file's missing metadata")
         }
         ToolbarItem {
+            Button("Apply Found Matches…", systemImage: "checkmark.circle") {
+                openWindow(id: "apply-found-matches")
+            }
+            .disabled(!canApplyFoundMatches)
+            .help("Apply every batch lookup's found match — Artist/Album/Year/Genre/Artwork only")
+        }
+        ToolbarItem {
             Button("Rename Files…", systemImage: "textformat") {
                 openWindow(id: "rename-files")
             }
             .disabled(scanner.files.isEmpty)
             .help("Rename files to \"Artist - Title\" using their tags")
         }
-        ToolbarItem {
-            Button("Collect into Folders…", systemImage: "folder.badge.plus") {
-                openWindow(id: "collect-into-folders")
+        if selectedCategory == .singles {
+            ToolbarItem {
+                Button("Collect into Folders…", systemImage: "folder.badge.plus") {
+                    openWindow(id: "collect-into-folders")
+                }
+                .disabled(scanner.files.isEmpty)
+                .help("Group each Singles track's mixes into a subfolder named after the release")
             }
-            .disabled(scanner.files.isEmpty)
-            .help("Group each Singles track's mixes into a subfolder named after the release")
         }
         Group {
             ToolbarItem {
@@ -584,12 +593,14 @@ struct ContentView: View {
                 .disabled(scanner.files.isEmpty)
                 .help("Find files sharing the same Artist and Title, and move the lower-quality copy aside")
             }
-            ToolbarItem {
-                Button("Check Album Completeness…", systemImage: "checklist") {
-                    openWindow(id: "check-album-completeness")
+            if selectedCategory == .albums {
+                ToolbarItem {
+                    Button("Check Album Completeness…", systemImage: "checklist") {
+                        openWindow(id: "check-album-completeness")
+                    }
+                    .disabled(scanner.files.isEmpty)
+                    .help("Check whether each scanned album folder has its full tracklist")
                 }
-                .disabled(scanner.files.isEmpty || scanner.category != .albums)
-                .help("Check whether each scanned album folder has its full tracklist")
             }
             ToolbarItem {
                 Button(scanner.isAnalyzingSpectrum ? "Stop" : "Check for Transcodes",
@@ -605,6 +616,16 @@ struct ContentView: View {
                       ? "Stop the spectral analysis — cutoffs measured so far are kept"
                       : "Measure each file's real frequency cutoff to flag likely transcoded/fake-quality files")
             }
+            ToolbarItem {
+                Button("Treat This Folder as the Artist", systemImage: "person.crop.square") {
+                    if let folder = scanner.scannedFolder {
+                        treatScannedFolderAsArtist(folder)
+                    }
+                }
+                .disabled(scanner.scannedFolder == nil
+                          || scanner.state == .scanning || scanner.state == .enumerating)
+                .help("Rescan the current folder using its own name as the artist — for scanning a single artist's folder directly instead of a parent folder containing many artists. Always available: unlike the mis-rooted-scan banner, this doesn't depend on the folder name looking like an album.")
+            }
         }
     }
 
@@ -612,6 +633,10 @@ struct ContentView: View {
         scanner.state == .finished
             && scanner.files.contains(where: \.hasIssues)
             && (!discogsToken.isEmpty || !musicBrainzContact.isEmpty)
+    }
+
+    private var canApplyFoundMatches: Bool {
+        scanner.lookupResults.values.contains { $0.isFound }
     }
 
     private func copyReport() {

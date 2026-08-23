@@ -284,6 +284,7 @@ private struct DiscogsResultRow: View {
                 HStack(spacing: 6) {
                     if let year = release.year { Text(year) }
                     if !release.combinedGenre.isEmpty { Text(release.combinedGenre) }
+                    if !release.formattedFormat.isEmpty { Text(release.formattedFormat) }
                     if let label = release.label?.first { Text(label) }
                 }
                 .font(.caption)
@@ -362,19 +363,12 @@ private struct ComparisonView: View {
                 }
 
                 ApplyToFileSection(file: file, scanner: scanner, fillable: fillable) {
-                    var changes = TagChanges()
-                    if fillable.contains(.artist) { changes.artist = release.parsedArtist }
-                    if fillable.contains(.album) { changes.album = release.parsedReleaseTitle }
-                    if fillable.contains(.year) { changes.year = release.year }
-                    if fillable.contains(.genre) {
-                        changes.genre = release.combinedGenre.isEmpty ? nil : release.combinedGenre
-                    }
+                    var changes = try await LookupCandidate.discogs(release)
+                        .buildChanges(fillable: fillable, discogsToken: discogsToken)
+                    // Title/Track Number need this view's own tracklist match —
+                    // the shared mapping never fills them for Discogs candidates.
                     if fillable.contains(.title) { changes.title = matchedTrack?.title }
                     if fillable.contains(.trackNumber) { changes.trackNumber = matchedTrack?.position }
-                    if fillable.contains(.artwork), let url = release.coverImageURL ?? release.thumbURL {
-                        changes.artworkJPEG = try await ArtworkDownloader.downloadJPEG(
-                            from: url, headers: ["Authorization": "Discogs token=\(discogsToken)"])
-                    }
                     return changes
                 }
 
@@ -452,6 +446,9 @@ private struct ComparisonView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(release.title).font(.headline)
+                if !release.formattedFormat.isEmpty {
+                    Text(release.formattedFormat).font(.caption).foregroundStyle(.secondary)
+                }
                 if let label = release.label?.first {
                     Text(label).font(.caption).foregroundStyle(.secondary)
                 }
@@ -827,15 +824,7 @@ private struct MusicBrainzComparisonView: View {
                 .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
 
                 ApplyToFileSection(file: file, scanner: scanner, fillable: fillable) {
-                    var changes = TagChanges()
-                    if fillable.contains(.title) { changes.title = recording.title }
-                    if fillable.contains(.artist) { changes.artist = recording.artistNames }
-                    if fillable.contains(.album) { changes.album = recording.releaseTitle }
-                    if fillable.contains(.year) { changes.year = recording.yearString }
-                    if fillable.contains(.artwork), let url = recording.coverArtURL {
-                        changes.artworkJPEG = try await ArtworkDownloader.downloadJPEG(from: url)
-                    }
-                    return changes
+                    try await LookupCandidate.musicBrainz(recording).buildChanges(fillable: fillable, discogsToken: "")
                 }
 
                 actions

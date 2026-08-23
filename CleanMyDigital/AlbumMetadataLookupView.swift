@@ -166,6 +166,7 @@ private struct AlbumDiscogsResultRow: View {
                 HStack(spacing: 6) {
                     if let year = release.year { Text(year) }
                     if !release.combinedGenre.isEmpty { Text(release.combinedGenre) }
+                    if !release.formattedFormat.isEmpty { Text(release.formattedFormat) }
                     if let label = release.label?.first { Text(label) }
                 }
                 .font(.caption)
@@ -273,6 +274,9 @@ private struct AlbumComparisonView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(release.title).font(.headline)
+                if !release.formattedFormat.isEmpty {
+                    Text(release.formattedFormat).font(.caption).foregroundStyle(.secondary)
+                }
                 if let label = release.label?.first {
                     Text(label).font(.caption).foregroundStyle(.secondary)
                 }

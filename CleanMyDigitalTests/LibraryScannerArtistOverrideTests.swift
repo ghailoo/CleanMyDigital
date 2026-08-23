@@ -107,6 +107,39 @@ struct LibraryScannerArtistOverrideTests {
         #expect(scanner.files.first?.expectedArtist == folder.lastPathComponent)
     }
 
+    /// The motivating case for always-available "Treat This Folder as the
+    /// Artist" toolbar button (as opposed to only the auto-detected
+    /// mis-rooted-scan banner): an extra category-level folder like
+    /// "Studio Albums" produces an `expectedArtist` that doesn't look like
+    /// an album name to `AudioFile.looksLikeAlbumFolderName` (no year, no
+    /// " - " separators) — so `possibleArtistFolderMismatch` never fires
+    /// and the banner never appears — yet the override still resolves the
+    /// resulting Artist Mismatch correctly once triggered.
+    @Test func overrideFixesArtistMismatchBehindAnExtraCategoryLevelFolderTheHeuristicMisses() async throws {
+        let folder = try Self.makeTempFolder()
+        let artistFolder = folder.appendingPathComponent("Pink Floyd")
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let albumFolder = artistFolder.appendingPathComponent("Studio Albums").appendingPathComponent("The Wall")
+        try FileManager.default.createDirectory(at: albumFolder, withIntermediateDirectories: true)
+        try Data().write(to: albumFolder.appendingPathComponent("track.mp3"))
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: artistFolder, category: .albums)
+
+        // Confirms the motivating gap: the heuristic-driven banner would
+        // not have appeared for this folder structure.
+        #expect(scanner.files.first?.expectedArtist == "Studio Albums")
+        #expect(!scanner.possibleArtistFolderMismatch)
+
+        // Same call the toolbar button (and the banner's own fix button)
+        // makes: rescan with the scanned folder's own name as the override.
+        await scanner.scan(folder: artistFolder, category: scanner.category ?? .albums,
+                            artistOverride: artistFolder.lastPathComponent)
+
+        #expect(scanner.files.allSatisfy { $0.expectedArtist == "Pink Floyd" })
+    }
+
     // MARK: - hasArtistMismatch under an override-sourced expectedArtist
 
     /// `AudioFile.hasArtistMismatch` only ever reads `expectedArtist` —
