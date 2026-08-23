@@ -37,6 +37,15 @@ enum TagWriteError: LocalizedError {
     /// value there rather than thrown — kept as a `TagWriteError` case
     /// purely to reuse this type's message formatting.
     case backupFailed(Error)
+    /// `startAccessingSecurityScopedResource()` on the scanned folder
+    /// returned false — the security-scoped bookmark that grants access to
+    /// it has gone stale (e.g. after a long session against a network
+    /// volume, possibly across a sleep/reconnect) or was otherwise never
+    /// (re-)granted. Proceeding into a file operation anyway fails
+    /// downstream with a confusing generic "no such file" error even
+    /// though the file is visibly right there in the results table; this
+    /// surfaces the real cause instead, before any operation is attempted.
+    case folderAccessUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -50,6 +59,8 @@ enum TagWriteError: LocalizedError {
             return error.localizedDescription
         case .backupFailed(let error):
             return "Backup failed: \(error.localizedDescription)"
+        case .folderAccessUnavailable:
+            return "Couldn't access the scanned folder anymore. Try Rescan, or choose the folder again."
         }
     }
 }
@@ -83,10 +94,10 @@ enum TagWriteHelpers {
 
 /// Dispatches tag writes to the per-format writer, if any.
 enum TagWriterRouter {
-    /// FLAC, MP3, M4A, WAV, and AIFF are the formats CleanMyDigital can
-    /// write to today. Everything else stays read-only.
+    /// FLAC, MP3, M4A, WAV, AIFF, and DSF are the formats CleanMyDigital
+    /// can write to today. Everything else stays read-only.
     private static let writableExtensions: Set<String> = [
-        "flac", "mp3", "m4a", "wav", "wave", "aif", "aiff", "aifc",
+        "flac", "mp3", "m4a", "wav", "wave", "aif", "aiff", "aifc", "dsf",
     ]
 
     nonisolated static func canWrite(fileExtension: String) -> Bool {
@@ -106,6 +117,8 @@ enum TagWriterRouter {
             try WAVTagWriter.write(changes, to: url)
         case "aif", "aiff", "aifc":
             try AIFFTagWriter.write(changes, to: url)
+        case "dsf":
+            try DSFTagWriter.write(changes, to: url)
         default:
             throw TagWriteError.unsupportedFormat(url.pathExtension)
         }

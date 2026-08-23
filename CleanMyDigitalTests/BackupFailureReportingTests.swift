@@ -77,10 +77,23 @@ struct BackupFailureReportingTests {
 
     // MARK: - Fixture
 
+    /// A plain temp-directory URL isn't a security-scoped bookmark, so
+    /// `startAccessingSecurityScopedResource()` on it returns false inside
+    /// this (sandboxed) test host — harmlessly, since the temp directory
+    /// sits inside the app's own container and needs no scoping to access,
+    /// but `LibraryScanner.applyTagChanges` now treats a false return as a
+    /// hard failure (see `LibraryScannerFolderAccessTests`). Round-tripping
+    /// through a real security-scoped bookmark gets a URL that legitimately
+    /// passes that check, so these tests can keep exercising the backup
+    /// path itself rather than the new access-check path.
     private static func makeTempFolder() throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
+        let bookmark = try folder.bookmarkData(
+            options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        var isStale = false
+        return try URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope],
+                        relativeTo: nil, bookmarkDataIsStale: &isStale)
     }
 
     /// Synthesizes a short sine wave, writes it as a WAV, then shells out to

@@ -10,8 +10,9 @@ import Foundation
 /// Verifies the two pieces behind "an online (Discogs) completeness
 /// confirmation persists for the session": the pure track-diff helper
 /// `[DiscogsTrack].missingTitles(matchedTrackIDs:)`, and
-/// `LibraryScanner`'s storage/reset of `albumCompletenessResults` —
-/// mirroring the existing `lookupResults`/`spectralResults` pattern.
+/// `LibraryScanner`'s storage of `albumCompletenessResults` — which,
+/// unlike `lookupResults`/`spectralResults`, deliberately survives across
+/// scans/rescans rather than being reset in `scan()`.
 struct AlbumCompletenessOnlineResultTests {
 
     // MARK: - [DiscogsTrack].missingTitles(matchedTrackIDs:)
@@ -62,7 +63,11 @@ struct AlbumCompletenessOnlineResultTests {
         #expect(scanner.albumCompletenessResults[albumFolder] == .missingTracks(["Intro"]))
     }
 
-    @Test func albumCompletenessResultsAreClearedByANewScan() async throws {
+    /// A rescan of a large, otherwise-unchanged discography shouldn't force
+    /// every already-confirmed album back to "Unknown locally" — unlike
+    /// `lookupResults`/`spectralResults`, this is a folder-level
+    /// confirmation, not a per-file reading tied to one scan's results.
+    @Test func albumCompletenessResultsSurviveARescan() async throws {
         let folder = try Self.makeTempFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
         try Data().write(to: folder.appendingPathComponent("track.mp3"))
@@ -70,10 +75,10 @@ struct AlbumCompletenessOnlineResultTests {
         let scanner = LibraryScanner()
         await scanner.scan(folder: folder, category: .albums)
         scanner.recordAlbumCompletenessResult(.confirmedComplete, for: folder)
-        #expect(!scanner.albumCompletenessResults.isEmpty)
+        #expect(scanner.albumCompletenessResults[folder] == .confirmedComplete)
 
         await scanner.scan(folder: folder, category: .albums)
-        #expect(scanner.albumCompletenessResults.isEmpty)
+        #expect(scanner.albumCompletenessResults[folder] == .confirmedComplete)
     }
 
     private static func makeTempFolder() throws -> URL {

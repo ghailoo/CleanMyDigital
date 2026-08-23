@@ -32,6 +32,12 @@ final class LibraryScanner {
     private struct RenameLogEntry: Sendable {
         let oldURL: URL
         let newURL: URL
+        /// True when this entry moved a whole album folder (see
+        /// `renameAlbumFolders`) rather than a single file — `oldURL`/
+        /// `newURL` are folder paths, so reversing it in
+        /// `undoLastFileOperation` has to update every file whose parent
+        /// matches, not look for one exact-URL match like the other entries.
+        let isFolderMove: Bool
     }
 
     private(set) var state: State = .idle
@@ -65,17 +71,34 @@ final class LibraryScanner {
     private var spectralTask: Task<Void, Never>?
 
     /// Online (Discogs) completeness confirmations, keyed by album folder
-    /// URL. Session-only — cleared whenever a new scan starts. Set via
-    /// `recordAlbumCompletenessResult(_:for:)` once a release's tracklist
-    /// has been compared against an album's local files, so
-    /// `AlbumCompletenessSheetView` can show a confirmed result instead of
-    /// "Unknown locally" forever.
+    /// URL. Set via `recordAlbumCompletenessResult(_:for:)` once a
+    /// release's tracklist has been compared against an album's local
+    /// files, so `AlbumCompletenessSheetView` can show a confirmed result
+    /// instead of "Unknown locally" forever.
+    ///
+    /// Unlike `lookupResults`/`spectralResults`, this deliberately
+    /// survives across scans/rescans instead of being reset in `scan()` —
+    /// it's a folder-level confirmation ("did I already check this album
+    /// against Discogs"), not a per-file reading that could go stale the
+    /// instant a file's tags change. Rescanning a large, otherwise-unchanged
+    /// discography (e.g. just to pick up one tag fix) shouldn't force every
+    /// other album's prior confirmation back to "Unknown locally." If an
+    /// album genuinely does change after being confirmed, that's still
+    /// correctable without any separate invalidation logic: revisiting
+    /// "Check on Discogs" and running Apply again for that one album
+    /// overwrites its stored result, since `recordAlbumCompletenessResult`
+    /// already runs unconditionally at the end of `applyToAlbum()`, even
+    /// when nothing new needed writing. Only cleared by quitting the app —
+    /// consistent with nothing else here persisting across launches either.
     private(set) var albumCompletenessResults: [URL: AlbumCompletenessOnlineResult] = [:]
 
-    /// The most recent batch of file moves, oldest first — renames and
-    /// "Collect into Folders" moves share this same slot, since both are
-    /// just `FileManager.moveItem` under the hood. Session-only, cleared on
-    /// a new scan. Powers "Undo Last Change".
+    /// The most recent batch of file moves, oldest first — renames,
+    /// "Collect into Folders" moves, duplicate moves, and album-folder
+    /// renames all share this same slot, since every one of them is just a
+    /// `FileManager.moveItem` under the hood (see `RenameLogEntry.isFolderMove`
+    /// for how a folder-level entry differs from a single-file one when
+    /// reversed). Session-only, cleared on a new scan. Powers "Undo Last
+    /// Change".
     private var lastRenameBatch: [RenameLogEntry] = []
     var canUndoLastFileOperation: Bool { !lastRenameBatch.isEmpty }
 
@@ -85,10 +108,22 @@ final class LibraryScanner {
         "aif", "aiff", "aifc", "caf", "mp4", "alac", "ac3", "eac3",
     ]
 
-    /// Audio formats we recognize but AVFoundation cannot open —
+    /// Formats with their own full native reader (and, for DSF, writer),
+    /// read entirely independently of AVFoundation — unlike
+    /// `supportedExtensions`' native readers (FLAC/WAV/AIFF), which only
+    /// supplement whatever AVFoundation already found, these have nothing
+    /// to supplement: AVFoundation cannot open them at all (confirmed
+    /// empirically for DSF — every `AVURLAsset.load()` call throws
+    /// `AVFoundationErrorDomain` code -11828, "file format not
+    /// recognized", not just for unusual files).
+    nonisolated static let nativeOnlyExtensions: Set<String> = [
+        "dsf",
+    ]
+
+    /// Audio formats we recognize but can't read at all yet —
     /// reported as unreadable so they still get flagged.
     nonisolated static let unsupportedAudioExtensions: Set<String> = [
-        "ogg", "oga", "opus", "wma", "ape", "wv", "mpc", "dsf", "dff",
+        "ogg", "oga", "opus", "wma", "ape", "wv", "mpc", "dff",
     ]
 
     var progress: Double {
@@ -159,8 +194,6 @@ final class LibraryScanner {
         spectralCompletedCount = 0
         spectralTotalCount = 0
 
-        albumCompletenessResults = [:]
-
         lastRenameBatch = []
 
         let urls = await Task.detached(priority: .userInitiated) {
@@ -223,8 +256,10 @@ final class LibraryScanner {
             throw TagWriteError.underlying(CocoaError(.fileNoSuchFile))
         }
 
-        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
-        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+        guard scannedFolder.startAccessingSecurityScopedResource() else {
+            throw TagWriteError.folderAccessUnavailable
+        }
+        defer { scannedFolder.stopAccessingSecurityScopedResource() }
 
         var backupFailure: TagWriteError?
         if backupFirst {
@@ -270,8 +305,14 @@ final class LibraryScanner {
             }
         }
 
-        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
-        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+        guard scannedFolder.startAccessingSecurityScopedResource() else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.file.url, currentName: $0.currentName,
+                                       proposedName: $0.proposedName,
+                                       errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+            }
+        }
+        defer { scannedFolder.stopAccessingSecurityScopedResource() }
 
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
@@ -282,7 +323,7 @@ final class LibraryScanner {
 
             do {
                 try performMove(from: oldURL, to: newURL)
-                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL))
+                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL, isFolderMove: false))
                 if let index = files.firstIndex(where: { $0.url == oldURL }) {
                     files[index] = files[index].renamed(to: newURL)
                 }
@@ -321,8 +362,14 @@ final class LibraryScanner {
             }
         }
 
-        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
-        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+        guard scannedFolder.startAccessingSecurityScopedResource() else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
+                                       proposedName: $0.proposedRelativePath,
+                                       errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+            }
+        }
+        defer { scannedFolder.stopAccessingSecurityScopedResource() }
 
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
@@ -336,7 +383,7 @@ final class LibraryScanner {
             do {
                 try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
                 try performMove(from: oldURL, to: newURL)
-                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL))
+                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL, isFolderMove: false))
                 if let index = files.firstIndex(where: { $0.url == oldURL }) {
                     files[index] = files[index].renamed(to: newURL)
                 }
@@ -375,8 +422,14 @@ final class LibraryScanner {
             }
         }
 
-        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
-        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+        guard scannedFolder.startAccessingSecurityScopedResource() else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
+                                       proposedName: $0.proposedRelativePath,
+                                       errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+            }
+        }
+        defer { scannedFolder.stopAccessingSecurityScopedResource() }
 
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
@@ -389,7 +442,7 @@ final class LibraryScanner {
             do {
                 try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
                 try performMove(from: oldURL, to: newURL)
-                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL))
+                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL, isFolderMove: false))
                 if let index = files.firstIndex(where: { $0.url == oldURL }) {
                     files[index] = files[index].renamed(to: newURL)
                 }
@@ -415,27 +468,127 @@ final class LibraryScanner {
         return results
     }
 
-    /// Reverses the most recent move batch (a rename or a "Collect into
-    /// Folders" run), most-recent-first so any collision-avoidance
-    /// ordering unwinds correctly.
+    /// Renames an album's containing folder to "Album Title (Year)"
+    /// (`proposal.proposedFolderName`, from `AlbumFolderRenamePlanner`),
+    /// then updates every file inside to reflect the new parent path.
+    ///
+    /// Structurally different from `renameFiles`/`collectIntoFolders`/
+    /// `moveDuplicates`, which each relocate one `AudioFile.url` at a time:
+    /// this moves the *folder* itself in a single `performMove` call, which
+    /// carries every file (and any non-audio sibling, e.g. cover art) along
+    /// with it on disk automatically — only the URL bookkeeping for files
+    /// already tracked in `files` needs updating afterward, by swapping
+    /// each one's parent folder for the new one and keeping its own
+    /// filename. `proposal.group.files` (captured when the proposal was
+    /// built) gives the exact set of files to update, rather than having to
+    /// re-derive "which files are under this folder" from `files` itself.
+    ///
+    /// Participates in the same `lastRenameBatch`/"Undo Last Change"
+    /// mechanism as the other move methods, via a folder-level
+    /// `RenameLogEntry` (`isFolderMove: true`) — reversing a folder move
+    /// isn't a single-file match like the others, so `undoLastFileOperation`
+    /// branches on that flag to update every file under the folder instead
+    /// of looking for one exact URL.
+    func renameAlbumFolders(_ proposals: [AlbumFolderRenameProposal]) async -> [RenameOperationResult] {
+        guard let scannedFolder else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.group.folderURL, currentName: $0.currentFolderName,
+                                       proposedName: $0.proposedFolderName,
+                                       errorDescription: "No scanned folder to rename within.")
+            }
+        }
+
+        guard scannedFolder.startAccessingSecurityScopedResource() else {
+            return proposals.map {
+                RenameOperationResult(originalURL: $0.group.folderURL, currentName: $0.currentFolderName,
+                                       proposedName: $0.proposedFolderName,
+                                       errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+            }
+        }
+        defer { scannedFolder.stopAccessingSecurityScopedResource() }
+
+        var results: [RenameOperationResult] = []
+        var batch: [RenameLogEntry] = []
+
+        for proposal in proposals {
+            let oldFolderURL = proposal.group.folderURL
+            let newFolderURL = oldFolderURL.deletingLastPathComponent()
+                .appendingPathComponent(proposal.proposedFolderName)
+
+            do {
+                try performMove(from: oldFolderURL, to: newFolderURL)
+                batch.append(RenameLogEntry(oldURL: oldFolderURL, newURL: newFolderURL, isFolderMove: true))
+                for groupFile in proposal.group.files {
+                    let oldFileURL = groupFile.url
+                    let newFileURL = newFolderURL.appendingPathComponent(oldFileURL.lastPathComponent)
+                    if let index = files.firstIndex(where: { $0.url == oldFileURL }) {
+                        files[index] = files[index].renamed(to: newFileURL)
+                    }
+                    if let outcome = lookupResults.removeValue(forKey: oldFileURL) {
+                        lookupResults[newFileURL] = outcome
+                    }
+                    if let outcome = spectralResults.removeValue(forKey: oldFileURL) {
+                        spectralResults[newFileURL] = outcome
+                    }
+                }
+                results.append(RenameOperationResult(
+                    originalURL: oldFolderURL, currentName: proposal.currentFolderName,
+                    proposedName: proposal.proposedFolderName, errorDescription: nil))
+            } catch {
+                results.append(RenameOperationResult(
+                    originalURL: oldFolderURL, currentName: proposal.currentFolderName,
+                    proposedName: proposal.proposedFolderName, errorDescription: error.localizedDescription))
+            }
+        }
+
+        if !batch.isEmpty {
+            lastRenameBatch = batch
+        }
+        return results
+    }
+
+    /// Reverses the most recent move batch (a rename, a "Collect into
+    /// Folders" run, a duplicate move, or an album-folder rename),
+    /// most-recent-first so any collision-avoidance ordering unwinds
+    /// correctly. A folder-level entry (`isFolderMove`) updates every file
+    /// whose parent folder is the moved folder, since there's no single
+    /// file URL to match against like the other entry kinds.
     func undoLastFileOperation() async -> [RenameOperationResult] {
         guard let scannedFolder, !lastRenameBatch.isEmpty else { return [] }
 
-        let didAccess = scannedFolder.startAccessingSecurityScopedResource()
-        defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+        guard scannedFolder.startAccessingSecurityScopedResource() else {
+            return lastRenameBatch.map {
+                RenameOperationResult(originalURL: $0.newURL, currentName: $0.newURL.lastPathComponent,
+                                       proposedName: $0.oldURL.lastPathComponent,
+                                       errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+            }
+        }
+        defer { scannedFolder.stopAccessingSecurityScopedResource() }
 
         var results: [RenameOperationResult] = []
         for entry in lastRenameBatch.reversed() {
             do {
                 try performMove(from: entry.newURL, to: entry.oldURL)
-                if let index = files.firstIndex(where: { $0.url == entry.newURL }) {
+                if entry.isFolderMove {
+                    for index in files.indices where files[index].url.deletingLastPathComponent() == entry.newURL {
+                        let oldFileURL = files[index].url
+                        let restoredURL = entry.oldURL.appendingPathComponent(oldFileURL.lastPathComponent)
+                        files[index] = files[index].renamed(to: restoredURL)
+                        if let outcome = lookupResults.removeValue(forKey: oldFileURL) {
+                            lookupResults[restoredURL] = outcome
+                        }
+                        if let outcome = spectralResults.removeValue(forKey: oldFileURL) {
+                            spectralResults[restoredURL] = outcome
+                        }
+                    }
+                } else if let index = files.firstIndex(where: { $0.url == entry.newURL }) {
                     files[index] = files[index].renamed(to: entry.oldURL)
-                }
-                if let outcome = lookupResults.removeValue(forKey: entry.newURL) {
-                    lookupResults[entry.oldURL] = outcome
-                }
-                if let outcome = spectralResults.removeValue(forKey: entry.newURL) {
-                    spectralResults[entry.oldURL] = outcome
+                    if let outcome = lookupResults.removeValue(forKey: entry.newURL) {
+                        lookupResults[entry.oldURL] = outcome
+                    }
+                    if let outcome = spectralResults.removeValue(forKey: entry.newURL) {
+                        spectralResults[entry.oldURL] = outcome
+                    }
                 }
                 results.append(RenameOperationResult(
                     originalURL: entry.newURL, currentName: entry.newURL.lastPathComponent,
@@ -525,8 +678,17 @@ final class LibraryScanner {
             // launched it, so access has to be released only once every
             // file has actually been read, not when `analyzeSpectrum()`
             // itself returns (immediately, after just starting the Task).
-            let didAccess = scannedFolder.startAccessingSecurityScopedResource()
-            defer { if didAccess { scannedFolder.stopAccessingSecurityScopedResource() } }
+            guard scannedFolder.startAccessingSecurityScopedResource() else {
+                let message = TagWriteError.folderAccessUnavailable.localizedDescription
+                for file in targets {
+                    spectralResults[file.url] = .failed(message)
+                }
+                spectralCompletedCount = targets.count
+                isAnalyzingSpectrum = false
+                spectralTask = nil
+                return
+            }
+            defer { scannedFolder.stopAccessingSecurityScopedResource() }
 
             let maxConcurrent = 4
             await withTaskGroup(of: (URL, SpectralCutoffOutcome).self) { group in
@@ -618,7 +780,8 @@ final class LibraryScanner {
                 continue
             }
             let ext = url.pathExtension.lowercased()
-            guard supportedExtensions.contains(ext) || unsupportedAudioExtensions.contains(ext),
+            guard supportedExtensions.contains(ext) || nativeOnlyExtensions.contains(ext)
+                    || unsupportedAudioExtensions.contains(ext),
                   (try? url.resourceValues(forKeys: Set(keys)).isRegularFile) == true
             else { continue }
             urls.append(url)
@@ -662,6 +825,36 @@ final class LibraryScanner {
                       year: nil, genre: nil, trackNumber: nil,
                       category: category, expectedArtist: expectedArtist,
                       isReadable: false)
+        }
+
+        // DSF needs a fully separate path — see `nativeOnlyExtensions`'s
+        // doc comment. There's no partial AVFoundation result to
+        // supplement here, unlike FLAC/WAV/AIFF's native readers, so this
+        // skips constructing an `AVURLAsset` entirely.
+        if nativeOnlyExtensions.contains(ext) {
+            guard let result = try? DSFMetadataReader.read(contentsOf: url) else { return unreadable() }
+            var artwork: NSImage?
+            if let artworkData = result.metadata.artworkData {
+                artwork = downscaledImage(from: artworkData, maxPixelSize: thumbnailMaxPixelSize)
+            }
+            return AudioFile(
+                url: url,
+                fileName: url.lastPathComponent,
+                fileExtension: ext,
+                sizeBytes: size,
+                duration: result.duration,
+                bitrateKbps: result.bitrateKbps,
+                title: result.metadata.title,
+                artist: result.metadata.artist,
+                album: result.metadata.album,
+                artworkThumbnail: artwork,
+                year: result.metadata.year,
+                genre: result.metadata.genre,
+                trackNumber: result.metadata.trackNumber,
+                category: category,
+                expectedArtist: expectedArtist,
+                isReadable: true
+            )
         }
 
         guard supportedExtensions.contains(ext) else { return unreadable() }

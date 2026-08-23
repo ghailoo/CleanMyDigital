@@ -36,6 +36,10 @@ struct AlbumGroup: Identifiable, Sendable {
     let folderURL: URL
     let artist: String?
     let albumTitle: String?
+    /// First non-empty Year tag among the group's files — same
+    /// first-non-empty derivation as `albumTitle`. Used, alongside
+    /// `albumTitle`, to propose a folder name via `AlbumFolderRenamePlanner`.
+    let year: String?
     /// Sorted by parsed track position where available, else by filename.
     let files: [AudioFile]
     /// The highest "total tracks" value parsed out of any file's
@@ -92,6 +96,7 @@ enum AlbumCompletenessChecker {
                 folderURL: folderURL,
                 artist: groupFiles.first(where: { $0.expectedArtist?.isEmpty == false })?.expectedArtist,
                 albumTitle: groupFiles.first(where: { $0.album?.isEmpty == false })?.album,
+                year: groupFiles.first(where: { $0.year?.isEmpty == false })?.year,
                 files: sortedFiles,
                 expectedTotalFromTags: maxTotal,
                 presentPositions: positions
