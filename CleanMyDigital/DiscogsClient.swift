@@ -283,22 +283,57 @@ enum DiscogsClient {
     /// Searches with the given track title; if that comes back with zero
     /// results, retries once with a trailing "(Mix)"-style parenthetical
     /// stripped, since a mix/edit name Discogs doesn't recognize can shadow
-    /// an otherwise-findable release. A thrown error (bad token, rate
-    /// limit, network failure) propagates immediately without retrying.
+    /// an otherwise-findable release. If that's still empty and
+    /// `allowArtistOnlyFallback` is true, retries once more with just the
+    /// artist (empty track) — Discogs' track-level search is much narrower
+    /// than its artist-only search and can fail on small differences
+    /// (accents, apostrophes, an unindexed track title) that an artist
+    /// search shrugs off, especially for less mainstream releases. Skipped
+    /// when `artist` is empty (the `q`-based free-text fallback below
+    /// already covers that case) or when `track` is already empty (the
+    /// first attempt was already effectively artist-only, so retrying would
+    /// just repeat the same request). A thrown error (bad token, rate
+    /// limit, network failure) propagates immediately without retrying at
+    /// any tier.
+    ///
+    /// `allowArtistOnlyFallback` defaults to true for the interactive
+    /// "Find on Discogs" flow, where a human reviews the result list before
+    /// anything is applied — a broader "any of this artist's releases"
+    /// result set is strictly useful there. The automated batch "Find All
+    /// Metadata" lookup (`LibraryScanner.lookupOutcome`) passes `false`:
+    /// it picks `releases.first` and applies its Genre/Year/Artwork with no
+    /// human review, so trading "found nothing" for "confidently applied
+    /// the wrong release's data" would be a regression, not a fix, for that
+    /// path.
     ///
     /// `album`, when non-empty, is sent alongside artist/track as
     /// `release_title` to narrow the search — useful for Albums/Compilations
     /// files where the release title is already known from the tag or folder.
-    static func search(artist: String, track: String, album: String = "", token: String) async throws -> [DiscogsRelease] {
+    static func search(
+        artist: String, track: String, album: String = "", token: String, allowArtistOnlyFallback: Bool = true
+    ) async throws -> [DiscogsRelease] {
         guard !token.isEmpty else { throw DiscogsError.missingToken }
 
         let results = try await performSearch(artist: artist, track: track, album: album, token: token)
         if !results.isEmpty { return results }
 
-        guard let fallbackTrack = MetadataQuery.strippingTrailingParenthetical(from: track) else {
-            return results
+        if let fallbackTrack = MetadataQuery.strippingTrailingParenthetical(from: track) {
+            let fallbackResults = try await performSearch(artist: artist, track: fallbackTrack, album: album, token: token)
+            if !fallbackResults.isEmpty { return fallbackResults }
         }
-        return try await performSearch(artist: artist, track: fallbackTrack, album: album, token: token)
+
+        guard shouldAttemptArtistOnlyFallback(
+            artist: artist, track: track, allowArtistOnlyFallback: allowArtistOnlyFallback)
+        else { return [] }
+        return try await performSearch(artist: artist, track: "", album: album, token: token)
+    }
+
+    /// The gating decision behind `search`'s third retry tier — factored
+    /// out, like `searchURL`, so it can be verified without hitting the
+    /// network. See `search`'s doc comment for what each condition guards
+    /// against.
+    static func shouldAttemptArtistOnlyFallback(artist: String, track: String, allowArtistOnlyFallback: Bool) -> Bool {
+        allowArtistOnlyFallback && !artist.isEmpty && !track.isEmpty
     }
 
     /// Builds the `/database/search` query items for an artist+track(+album)

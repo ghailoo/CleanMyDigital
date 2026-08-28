@@ -33,6 +33,44 @@ struct DiscogsClientSearchTests {
         #expect(!query.contains { $0.name == "release_title" })
     }
 
+    // MARK: - shouldAttemptArtistOnlyFallback (search's third retry tier)
+
+    @Test func attemptsArtistOnlyFallbackWhenAllowedWithBothArtistAndTrack() {
+        #expect(DiscogsClient.shouldAttemptArtistOnlyFallback(
+            artist: "Anouar Brahem", track: "En souvenir d'Iram", allowArtistOnlyFallback: true))
+    }
+
+    @Test func skipsArtistOnlyFallbackWhenTheCallerDisallowsIt() {
+        // The automated batch lookup's case — see `search`'s doc comment on
+        // why it passes `allowArtistOnlyFallback: false`.
+        #expect(!DiscogsClient.shouldAttemptArtistOnlyFallback(
+            artist: "Anouar Brahem", track: "En souvenir d'Iram", allowArtistOnlyFallback: false))
+    }
+
+    @Test func skipsArtistOnlyFallbackWhenArtistIsEmpty() {
+        // The q-based free-text fallback already covers a missing artist.
+        #expect(!DiscogsClient.shouldAttemptArtistOnlyFallback(
+            artist: "", track: "En souvenir d'Iram", allowArtistOnlyFallback: true))
+    }
+
+    @Test func skipsArtistOnlyFallbackWhenTrackIsAlreadyEmpty() {
+        // The first attempt was already effectively artist-only — retrying
+        // would just repeat the same request.
+        #expect(!DiscogsClient.shouldAttemptArtistOnlyFallback(
+            artist: "Anouar Brahem", track: "", allowArtistOnlyFallback: true))
+    }
+
+    @Test func artistOnlySearchURLOmitsTheTrackParamButKeepsArtist() throws {
+        // What `search`'s third tier actually sends — matches the confirmed
+        // real-world case: "Anouar Brahem" + "En souvenir d'Iram" finds
+        // nothing, but "Anouar Brahem" alone correctly finds the release.
+        let url = try #require(DiscogsClient.searchURL(artist: "Anouar Brahem", track: "", album: ""))
+        let query = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+
+        #expect(query.contains(URLQueryItem(name: "artist", value: "Anouar Brahem")))
+        #expect(!query.contains { $0.name == "track" })
+    }
+
     @Test func queryDerivesAlbumFromTheFilesAlbumTag() {
         let file = Self.makeFile(album: "Greatest Hits")
         #expect(DiscogsQuery(for: file).album == "Greatest Hits")
