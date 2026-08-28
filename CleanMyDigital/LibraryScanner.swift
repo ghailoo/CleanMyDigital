@@ -52,6 +52,17 @@ final class LibraryScanner {
     /// `expectedArtist(for:in:)`'s normal folder-depth calculation applies.
     private(set) var artistOverride: String?
 
+    /// True when the current `artistOverride` was set automatically by
+    /// `scan(folder:category:artistOverride:)`'s own detection (see
+    /// `detectArtistFolderOverride`) rather than by the caller passing one
+    /// explicitly — i.e. the user never clicked "Treat This Folder as the
+    /// Artist" or the banner's fix button for this scan. `ContentView` uses
+    /// this to show a passive "here's what I detected" confirmation instead
+    /// of nothing, while still only showing the reactive mismatch banner
+    /// for cases detection didn't resolve. Always false when `artistOverride`
+    /// is nil, and reset to false at the start of every scan.
+    private(set) var artistOverrideAutoDetected = false
+
     /// Batch "Find All Metadata" results, keyed by file URL. Session-only —
     /// cleared whenever a new scan starts.
     private(set) var lookupResults: [URL: LookupOutcome] = [:]
@@ -168,6 +179,14 @@ final class LibraryScanner {
     /// instead of the usual folder-depth calculation — for scanning an
     /// artist's own folder directly (`ArtistFolder/AlbumName/Track.ext`)
     /// rather than a parent folder containing multiple artist folders.
+    ///
+    /// When the caller passes `artistOverride: nil` (the normal case) and
+    /// `category == .albums`, this also tries to detect that same situation
+    /// on its own — see `detectArtistFolderOverride` — and applies it
+    /// automatically, setting `artistOverrideAutoDetected` so callers can
+    /// tell an automatic override apart from an explicitly requested one.
+    /// An explicitly passed override always wins outright; detection only
+    /// ever runs to fill in a nil.
     func scan(folder: URL, category: LibraryCategory, artistOverride: String? = nil) async {
         let didAccess = folder.startAccessingSecurityScopedResource()
         defer { if didAccess { folder.stopAccessingSecurityScopedResource() } }
@@ -179,6 +198,7 @@ final class LibraryScanner {
         scannedFolder = folder
         self.category = category
         self.artistOverride = artistOverride
+        artistOverrideAutoDetected = false
 
         lookupTask?.cancel()
         lookupTask = nil
@@ -201,6 +221,18 @@ final class LibraryScanner {
         }.value
 
         totalCount = urls.count
+
+        // Only try to auto-detect when the caller didn't already tell us —
+        // an explicit override (including a rescan forwarding the stored
+        // one) always wins outright, nothing to detect.
+        var effectiveArtistOverride = artistOverride
+        if artistOverride == nil, category == .albums,
+           let detected = Self.detectArtistFolderOverride(urls: urls, folder: folder) {
+            effectiveArtistOverride = detected
+            self.artistOverride = detected
+            artistOverrideAutoDetected = true
+        }
+
         state = .scanning
 
         // Read metadata with bounded concurrency so huge libraries stay responsive.
@@ -213,7 +245,8 @@ final class LibraryScanner {
             var inFlight = 0
 
             while inFlight < maxConcurrent, let url = iterator.next() {
-                let expected = Self.expectedArtist(for: url, in: folder, override: artistOverride, category: category)
+                let expected = Self.expectedArtist(
+                    for: url, in: folder, override: effectiveArtistOverride, category: category)
                 group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 inFlight += 1
             }
@@ -221,7 +254,8 @@ final class LibraryScanner {
                 results.append(file)
                 scannedCount += 1
                 if let url = iterator.next() {
-                    let expected = Self.expectedArtist(for: url, in: folder, override: artistOverride, category: category)
+                    let expected = Self.expectedArtist(
+                        for: url, in: folder, override: effectiveArtistOverride, category: category)
                     group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 }
             }
@@ -741,7 +775,13 @@ final class LibraryScanner {
 
         if !discogsToken.isEmpty {
             let query = DiscogsQuery(for: file)
-            if let releases = try? await DiscogsClient.search(artist: query.artist, track: query.track, token: discogsToken),
+            // allowArtistOnlyFallback: false — this path picks `releases.first`
+            // and applies its Genre/Year/Artwork with no human review, so a
+            // broader "any of this artist's releases" result set risks
+            // confidently applying the wrong release's data instead of just
+            // finding nothing. See DiscogsClient.search's doc comment.
+            if let releases = try? await DiscogsClient.search(
+                artist: query.artist, track: query.track, token: discogsToken, allowArtistOnlyFallback: false),
                let top = releases.first {
                 let fillable = top.fillableFields(missing: missing)
                 if !fillable.isEmpty {
@@ -802,13 +842,62 @@ final class LibraryScanner {
         for url: URL, in folder: URL, override: String?, category: LibraryCategory
     ) -> String? {
         if category == .albums, let override { return override }
+        return firstLevelFolderName(for: url, in: folder)
+    }
 
+    /// The first path component of `url` under `folder`, with no override
+    /// applied — the raw folder-depth calculation `expectedArtist(for:in:
+    /// override:category:)` falls back to, and what `detectArtistFolderOverride`
+    /// inspects directly (before any override exists to short-circuit it).
+    nonisolated private static func firstLevelFolderName(for url: URL, in folder: URL) -> String? {
         let rootComponents = folder.standardizedFileURL.pathComponents
         let fileComponents = url.standardizedFileURL.pathComponents
         guard fileComponents.count > rootComponents.count + 1,
               Array(fileComponents.prefix(rootComponents.count)) == rootComponents
         else { return nil }
         return fileComponents[rootComponents.count]
+    }
+
+    /// Auto-detects the "treat this folder as the artist" override for a
+    /// plain Albums scan, so the common case — scanning one artist's own
+    /// folder, which directly contains that artist's album subfolders —
+    /// doesn't need the user to notice `possibleArtistFolderMismatch`'s
+    /// banner and click its fix button every time. Uses only `urls` (the
+    /// just-enumerated file paths), not metadata, so it's cheap enough to
+    /// run before the metadata-reading pass starts.
+    ///
+    /// Same signal as the reactive banner: for each distinct first-level
+    /// folder name under `folder` (ignoring files that sit directly in
+    /// `folder` with no subfolder — nothing to detect from those), checks
+    /// how many look like an album name per `AudioFile.looksLikeAlbumFolderName`
+    /// rather than an artist name.
+    ///
+    /// Requires *both*:
+    /// - at least 2 distinct folder names. A single subfolder is genuinely
+    ///   ambiguous — indistinguishable, from folder names alone, between
+    ///   "artist folder containing exactly one album" and any other
+    ///   one-off folder that happens to match the album-name heuristic —
+    ///   so it isn't enough evidence for a pattern. That ambiguous case is
+    ///   left to the reactive banner and the manual toolbar button, exactly
+    ///   as before.
+    /// - at least two-thirds of those distinct names look like album names.
+    ///   Two-thirds (rather than unanimous) tolerates the realistic wrinkle
+    ///   of one or two oddly-named folders sitting alongside genuine album
+    ///   folders — a "Bonus", "Live", or "Artwork" folder — without that
+    ///   alone blocking detection of what's overwhelmingly an artist folder
+    ///   full of albums. It's still strict enough that an ordinary
+    ///   multi-artist folder won't false-positive: getting two-thirds of a
+    ///   folder's *artist* names to look like album names (a 4-digit year
+    ///   and/or multiple " - "-separated parts) would take a very unusual
+    ///   library.
+    nonisolated private static func detectArtistFolderOverride(urls: [URL], folder: URL) -> String? {
+        let distinctFolderNames = Set(urls.compactMap { firstLevelFolderName(for: $0, in: folder) })
+        guard distinctFolderNames.count >= 2 else { return nil }
+
+        let albumLikeCount = distinctFolderNames.filter { AudioFile.looksLikeAlbumFolderName($0) }.count
+        guard albumLikeCount * 3 >= distinctFolderNames.count * 2 else { return nil }
+
+        return folder.lastPathComponent
     }
 
     nonisolated private static func inspect(

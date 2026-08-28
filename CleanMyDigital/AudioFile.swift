@@ -96,11 +96,28 @@ struct AudioFile: Identifiable, Sendable {
 
     /// True when the Artist tag is present but doesn't match the folder
     /// it's filed under. Only checked for Albums.
+    ///
+    /// Beyond an exact (case-insensitive) match, also accepts `artist`
+    /// *containing* `expectedArtist` as a substring — e.g. tag
+    /// "Anouar Brahem Trio" under an "Anouar Brahem" folder, a trio billing
+    /// for one release correctly filed under the artist's overall folder.
+    /// Deliberately one-directional: the reverse (`expectedArtist`
+    /// containing `artist`) is NOT accepted, and must not be added later to
+    /// "make this symmetric" — that's exactly the shape of the mis-rooted-
+    /// scan case `looksLikeAlbumFolderName`/`possibleArtistFolderMismatch`
+    /// exists to catch. A garbled `expectedArtist` like
+    /// "1995 - C + C Music Factory" (a scan rooted at an album folder
+    /// instead of its artist parent) *also* contains the real artist name
+    /// "C + C Music Factory" as a substring — accepting that direction here
+    /// would silently stop flagging the mismatch that heuristic relies on
+    /// this check to surface.
     var hasArtistMismatch: Bool {
         guard category.checksArtistFolder,
               let expectedArtist, let artist, !artist.isEmpty
         else { return false }
-        return artist.caseInsensitiveCompare(expectedArtist) != .orderedSame
+        // A string trivially "contains" itself, so this also covers the
+        // exact-match case without a separate comparison.
+        return !artist.localizedCaseInsensitiveContains(expectedArtist)
     }
 
     /// Every problem found on this file: missing fields plus an artist

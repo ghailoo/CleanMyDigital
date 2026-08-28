@@ -140,6 +140,156 @@ struct LibraryScannerArtistOverrideTests {
         #expect(scanner.files.allSatisfy { $0.expectedArtist == "Pink Floyd" })
     }
 
+    // MARK: - Proactive auto-detection
+
+    /// The motivating everyday case: an artist's own folder scanned
+    /// directly, containing several album subfolders that all look like
+    /// album names. Detection should fire on its own — no warning banner,
+    /// no manual click needed — stamping every file's `expectedArtist` with
+    /// the scanned root's own name, exactly as if the user had clicked
+    /// "Treat This Folder as the Artist" themselves.
+    @Test func autoDetectsAnArtistFolderFullOfAlbumLikeSubfolders() async throws {
+        let artistFolder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: artistFolder) }
+
+        for album in ["2Pac - 1996 - All Eyez on Me", "2Pac - 1998 - Greatest Hits", "2Pac - 1999 - Still I Rise"] {
+            let albumFolder = artistFolder.appendingPathComponent(album)
+            try FileManager.default.createDirectory(at: albumFolder, withIntermediateDirectories: true)
+            try Data().write(to: albumFolder.appendingPathComponent("track.mp3"))
+        }
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: artistFolder, category: .albums)
+
+        #expect(scanner.artistOverrideAutoDetected)
+        #expect(scanner.artistOverride == artistFolder.lastPathComponent)
+        #expect(scanner.files.allSatisfy { $0.expectedArtist == artistFolder.lastPathComponent })
+        #expect(!scanner.possibleArtistFolderMismatch)
+        #expect(scanner.misrootedArtistFolderExample == nil)
+    }
+
+    /// One oddly-named folder ("Live") among several genuine album folders
+    /// shouldn't block detection — two of the three distinct subfolder
+    /// names look album-like, meeting the two-thirds threshold.
+    @Test func autoDetectionToleratesOneOddlyNamedFolderAmongAlbumLikeOnes() async throws {
+        let artistFolder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: artistFolder) }
+
+        for album in ["2Pac - 1996 - All Eyez on Me", "2Pac - 1998 - Greatest Hits", "Live"] {
+            let albumFolder = artistFolder.appendingPathComponent(album)
+            try FileManager.default.createDirectory(at: albumFolder, withIntermediateDirectories: true)
+            try Data().write(to: albumFolder.appendingPathComponent("track.mp3"))
+        }
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: artistFolder, category: .albums)
+
+        #expect(scanner.artistOverrideAutoDetected)
+        #expect(scanner.artistOverride == artistFolder.lastPathComponent)
+    }
+
+    /// A single album-like subfolder is genuinely ambiguous (see
+    /// `LibraryScanner.detectArtistFolderOverride`'s doc comment) and isn't
+    /// enough evidence on its own — detection requires at least 2 distinct
+    /// folder names. This is also exactly
+    /// `LibraryScannerArtistFolderMismatchTests.flagsAScanRootedAtAnAlbumFolderInsteadOfItsParent`'s
+    /// fixture, confirming the reactive banner still fires unchanged for it.
+    @Test func doesNotAutoDetectFromASingleAlbumLikeSubfolder() async throws {
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let albumLikeFolder = folder.appendingPathComponent("2Pac - 1998 - Greatest Hits (Bootleg)")
+        try FileManager.default.createDirectory(at: albumLikeFolder, withIntermediateDirectories: true)
+        try Data().write(to: albumLikeFolder.appendingPathComponent("track.mp3"))
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: folder, category: .albums)
+
+        #expect(!scanner.artistOverrideAutoDetected)
+        #expect(scanner.artistOverride == nil)
+        #expect(scanner.possibleArtistFolderMismatch)
+    }
+
+    /// A normal multi-artist parent folder — each subfolder is an artist
+    /// name, none of which look like an album name — must not trigger
+    /// detection.
+    @Test func doesNotAutoDetectAnOrdinaryMultiArtistParentFolder() async throws {
+        let parentFolder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: parentFolder) }
+
+        for artist in ["2Pac", "Notorious B.I.G.", "Nas"] {
+            let artistAlbumFolder = parentFolder.appendingPathComponent(artist).appendingPathComponent("Album")
+            try FileManager.default.createDirectory(at: artistAlbumFolder, withIntermediateDirectories: true)
+            try Data().write(to: artistAlbumFolder.appendingPathComponent("track.mp3"))
+        }
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: parentFolder, category: .albums)
+
+        #expect(!scanner.artistOverrideAutoDetected)
+        #expect(scanner.artistOverride == nil)
+    }
+
+    /// Below the two-thirds threshold: only 1 of 3 distinct subfolder names
+    /// looks album-like, so detection must not fire even though the count
+    /// requirement (>= 2 distinct names) is met.
+    @Test func doesNotAutoDetectBelowTheTwoThirdsThreshold() async throws {
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        for name in ["2Pac - 1998 - Greatest Hits", "Studio Sessions", "Extras"] {
+            let subfolder = folder.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: subfolder, withIntermediateDirectories: true)
+            try Data().write(to: subfolder.appendingPathComponent("track.mp3"))
+        }
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: folder, category: .albums)
+
+        #expect(!scanner.artistOverrideAutoDetected)
+        #expect(scanner.artistOverride == nil)
+    }
+
+    /// An explicitly passed override (e.g. a rescan forwarding
+    /// `scanner.artistOverride`) always wins outright — detection must not
+    /// run, and `artistOverrideAutoDetected` must stay false, even though
+    /// the folder structure would otherwise qualify.
+    @Test func explicitOverrideSuppressesAutoDetectionEvenWhenTheHeuristicWouldMatch() async throws {
+        let artistFolder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: artistFolder) }
+
+        for album in ["2Pac - 1996 - All Eyez on Me", "2Pac - 1998 - Greatest Hits"] {
+            let albumFolder = artistFolder.appendingPathComponent(album)
+            try FileManager.default.createDirectory(at: albumFolder, withIntermediateDirectories: true)
+            try Data().write(to: albumFolder.appendingPathComponent("track.mp3"))
+        }
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: artistFolder, category: .albums, artistOverride: "2Pac")
+
+        #expect(!scanner.artistOverrideAutoDetected)
+        #expect(scanner.artistOverride == "2Pac")
+    }
+
+    /// Only Albums scans auto-detect — Compilations/Singles keep the normal
+    /// folder-depth calculation even with an album-like folder structure.
+    @Test func autoDetectionDoesNotApplyOutsideOfAlbumsCategory() async throws {
+        let artistFolder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: artistFolder) }
+
+        for album in ["2Pac - 1996 - All Eyez on Me", "2Pac - 1998 - Greatest Hits"] {
+            let albumFolder = artistFolder.appendingPathComponent(album)
+            try FileManager.default.createDirectory(at: albumFolder, withIntermediateDirectories: true)
+            try Data().write(to: albumFolder.appendingPathComponent("track.mp3"))
+        }
+
+        let scanner = LibraryScanner()
+        await scanner.scan(folder: artistFolder, category: .compilations)
+
+        #expect(!scanner.artistOverrideAutoDetected)
+        #expect(scanner.artistOverride == nil)
+    }
+
     // MARK: - hasArtistMismatch under an override-sourced expectedArtist
 
     /// `AudioFile.hasArtistMismatch` only ever reads `expectedArtist` —
@@ -154,6 +304,29 @@ struct LibraryScannerArtistOverrideTests {
     @Test func hasArtistMismatchIsFalseWhenTheRealArtistTagMatchesTheOverride() {
         let file = Self.makeFile(artist: "2Pac", expectedArtist: "2Pac")
         #expect(!file.hasArtistMismatch)
+    }
+
+    // MARK: - hasArtistMismatch's one-directional fuzzy match
+
+    /// The case this fuzzy match fixes: a trio billing for one release,
+    /// correctly tagged, filed under the artist's overall folder — `artist`
+    /// extends `expectedArtist`, so this is no longer flagged.
+    @Test func hasArtistMismatchIsFalseWhenTheArtistTagExtendsTheExpectedArtist() {
+        let file = Self.makeFile(artist: "Anouar Brahem Trio", expectedArtist: "Anouar Brahem")
+        #expect(!file.hasArtistMismatch)
+    }
+
+    /// The case this fuzzy match must NOT swallow: a scan rooted at an
+    /// album folder instead of its artist parent produces a garbled
+    /// `expectedArtist` like "1995 - C + C Music Factory", which also
+    /// contains the real artist name as a substring — but in the *reverse*
+    /// direction from the trio case above. Accepting that direction too
+    /// would silently stop flagging exactly the mismatch
+    /// `possibleArtistFolderMismatch`/the "Treat as Artist" banner exists to
+    /// catch, so this must still be flagged.
+    @Test func hasArtistMismatchStillFlagsAGarbledExpectedArtistThatIsASupersetOfTheRealArtist() {
+        let file = Self.makeFile(artist: "C + C Music Factory", expectedArtist: "1995 - C + C Music Factory")
+        #expect(file.hasArtistMismatch)
     }
 
     // MARK: - Fixtures

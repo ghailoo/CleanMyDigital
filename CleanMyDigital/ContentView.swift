@@ -208,6 +208,9 @@ struct ContentView: View {
             if let example = scanner.misrootedArtistFolderExample {
                 misrootedFolderWarningBanner(example: example)
                 Divider()
+            } else if scanner.artistOverrideAutoDetected, let artist = scanner.artistOverride {
+                autoDetectedArtistFolderBanner(artist: artist)
+                Divider()
             }
             summaryBar
             Divider()
@@ -253,6 +256,30 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color.yellow.opacity(0.15))
+    }
+
+    /// Passive, low-key confirmation that `scan(folder:category:artistOverride:)`
+    /// detected this scan as "one artist's own folder, containing albums
+    /// directly" on its own and already applied the artist-folder override
+    /// — see `LibraryScanner.artistOverrideAutoDetected`. Deliberately
+    /// quieter than `misrootedFolderWarningBanner`: this is confirming
+    /// something already handled, not asking the user to do anything, so no
+    /// yellow background, no warning icon, no button — just a note the user
+    /// can glance at or ignore. Mutually exclusive with that banner: once
+    /// detection fires, `possibleArtistFolderMismatch` reads false, so only
+    /// one of the two ever shows for a given scan.
+    private func autoDetectedArtistFolderBanner(artist: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle")
+                .foregroundStyle(.secondary)
+                .imageScale(.small)
+            Text("Detected \"\(artist)\" as the artist for this scan.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private func treatScannedFolderAsArtist(_ folder: URL) {
