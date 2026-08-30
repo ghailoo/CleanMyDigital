@@ -119,22 +119,27 @@ final class LibraryScanner {
         "aif", "aiff", "aifc", "caf", "mp4", "alac", "ac3", "eac3",
     ]
 
-    /// Formats with their own full native reader (and, for DSF, writer),
-    /// read entirely independently of AVFoundation — unlike
-    /// `supportedExtensions`' native readers (FLAC/WAV/AIFF), which only
-    /// supplement whatever AVFoundation already found, these have nothing
-    /// to supplement: AVFoundation cannot open them at all (confirmed
-    /// empirically for DSF — every `AVURLAsset.load()` call throws
+    /// Formats with their own full native reader and writer, read entirely
+    /// independently of AVFoundation — unlike `supportedExtensions`'
+    /// native readers (FLAC/WAV/AIFF), which only supplement whatever
+    /// AVFoundation already found, these have nothing to supplement:
+    /// AVFoundation cannot open them at all (confirmed empirically for
+    /// both DSF and WavPack — every `AVURLAsset.load()` call throws
     /// `AVFoundationErrorDomain` code -11828, "file format not
     /// recognized", not just for unusual files).
     nonisolated static let nativeOnlyExtensions: Set<String> = [
-        "dsf",
+        "dsf", "wv",
     ]
 
     /// Audio formats we recognize but can't read at all yet —
     /// reported as unreadable so they still get flagged.
+    ///
+    /// `.ape` (Monkey's Audio) uses the same APEv2 tag format as WavPack
+    /// (see `APEv2Tag.swift`, written format-agnostic for exactly this
+    /// reason) — adding it here would mostly be container work (locating
+    /// where its audio ends), not another tag parser.
     nonisolated static let unsupportedAudioExtensions: Set<String> = [
-        "ogg", "oga", "opus", "wma", "ape", "wv", "mpc", "dff",
+        "ogg", "oga", "opus", "wma", "ape", "mpc", "dff",
     ]
 
     var progress: Double {
@@ -916,12 +921,34 @@ final class LibraryScanner {
                       isReadable: false)
         }
 
-        // DSF needs a fully separate path — see `nativeOnlyExtensions`'s
-        // doc comment. There's no partial AVFoundation result to
-        // supplement here, unlike FLAC/WAV/AIFF's native readers, so this
-        // skips constructing an `AVURLAsset` entirely.
+        // DSF and WavPack each need a fully separate path — see
+        // `nativeOnlyExtensions`'s doc comment. There's no partial
+        // AVFoundation result to supplement here, unlike FLAC/WAV/AIFF's
+        // native readers, so this skips constructing an `AVURLAsset`
+        // entirely. The two formats share nothing beyond both landing
+        // here — DSF's tags are ID3, WavPack's are APEv2 — so each has its
+        // own reader, but both produce the same `duration`/`bitrateKbps`/
+        // `NativeAudioMetadata` shape this merges into an `AudioFile`.
         if nativeOnlyExtensions.contains(ext) {
-            guard let result = try? DSFMetadataReader.read(contentsOf: url) else { return unreadable() }
+            let result: (metadata: NativeAudioMetadata, duration: TimeInterval?, bitrateKbps: Int?)?
+            switch ext {
+            case "dsf":
+                if let r = try? DSFMetadataReader.read(contentsOf: url) {
+                    result = (r.metadata, r.duration, r.bitrateKbps)
+                } else {
+                    result = nil
+                }
+            case "wv":
+                if let r = try? WavPackMetadataReader.read(contentsOf: url) {
+                    result = (r.metadata, r.duration, r.bitrateKbps)
+                } else {
+                    result = nil
+                }
+            default:
+                result = nil
+            }
+            guard let result else { return unreadable() }
+
             var artwork: NSImage?
             if let artworkData = result.metadata.artworkData {
                 artwork = downscaledImage(from: artworkData, maxPixelSize: thumbnailMaxPixelSize)
