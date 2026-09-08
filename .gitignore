@@ -1,0 +1,15 @@
+# Xcode build output
+build/
+DerivedData/
+*.moved-aside
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Unrelated vendored source that happens to sit beside this project —
+# never part of CleanMyDigital.
+mistral-src/
