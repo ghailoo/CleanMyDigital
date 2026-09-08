@@ -56,14 +56,32 @@ enum DuplicatePlanner {
     }
 
     /// Builds move proposals for every extra (non-keeper) file across
-    /// `groups`, mirroring each file's path relative to `root` under the
-    /// review folder.
-    static func plan(for groups: [DuplicateGroup], root: URL) -> [DuplicateMoveProposal] {
+    /// `groups`, mirroring each file's path relative to its own root under
+    /// the review folder.
+    ///
+    /// Takes every scanned root rather than one, because a scan can cover
+    /// several folders at once and a duplicate group is precisely where
+    /// that matters — the same track found under two different artist
+    /// folders is the case this feature exists to catch. Each file's path
+    /// is measured against the root it actually came from, so the loser
+    /// moves into a review folder inside its own root; the resulting
+    /// `proposedRelativePath` is therefore only meaningful relative to
+    /// that root, which is how `LibraryScanner.moveDuplicates` resolves it.
+    ///
+    /// Matches `LibraryScanner.root(containing:)` in preferring the
+    /// longest matching root, so nested selections resolve to the nearest
+    /// enclosing folder rather than an outer one.
+    static func plan(for groups: [DuplicateGroup], roots: [URL]) -> [DuplicateMoveProposal] {
         groups.flatMap { group in
             group.extras.compactMap { file -> DuplicateMoveProposal? in
-                guard let relativePath = relativePath(of: file.url, from: root) else { return nil }
+                let candidates = roots.compactMap { root in
+                    relativePath(of: file.url, from: root).map { (root: root, path: $0) }
+                }
+                // Fewest components == deepest root, since a deeper root
+                // leaves a shorter path remaining below it.
+                guard let best = candidates.min(by: { $0.path.count < $1.path.count }) else { return nil }
                 return DuplicateMoveProposal(
-                    file: file, proposedRelativePath: "\(reviewFolderName)/\(relativePath)")
+                    file: file, proposedRelativePath: "\(reviewFolderName)/\(best.path)")
             }
         }
     }

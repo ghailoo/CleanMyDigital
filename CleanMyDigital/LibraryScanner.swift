@@ -44,7 +44,25 @@ final class LibraryScanner {
     private(set) var files: [AudioFile] = []
     private(set) var scannedCount = 0
     private(set) var totalCount = 0
-    private(set) var scannedFolder: URL?
+    /// Every root the current scan covers, in the order they were chosen.
+    /// Usually one, but a Singles scan can take several artist folders at
+    /// once — so anything deriving a path *relative to a root* (backups,
+    /// duplicate moves, expected artist) has to resolve the file's own
+    /// root with `root(containing:)` rather than assume a single one.
+    private(set) var scannedFolders: [URL] = []
+
+    /// The one scanned root, for the callers that genuinely only make
+    /// sense with a single folder — the "treat this folder as the artist"
+    /// rescan, and the subtitle's folder path. Nil when a scan covers
+    /// several folders, which is the honest answer there rather than
+    /// silently picking the first.
+    var scannedFolder: URL? { scannedFolders.count == 1 ? scannedFolders[0] : nil }
+
+    /// Whether anything has been scanned at all — what toolbar actions
+    /// gate on, since they work fine across several roots and shouldn't
+    /// disable themselves just because `scannedFolder` is nil.
+    var hasScannedFolder: Bool { !scannedFolders.isEmpty }
+
     private(set) var category: LibraryCategory?
     /// A fixed artist name to use for every file instead of computing it
     /// from folder depth — set via `scan(folder:category:artistOverride:)`
@@ -148,6 +166,53 @@ final class LibraryScanner {
         totalCount > 0 ? Double(scannedCount) / Double(totalCount) : 0
     }
 
+    /// The scanned root `fileURL` came from. Backups, duplicate moves and
+    /// expected-artist derivation are all defined relative to a root, and
+    /// once several folders can be scanned together there's no single
+    /// "the scanned folder" to measure against — each file has to be
+    /// resolved to the one it actually came from.
+    ///
+    /// Picks the *longest* matching root, so selecting both a parent
+    /// folder and something inside it resolves each file to its nearest
+    /// enclosing root rather than whichever happened to be chosen first.
+    func root(containing fileURL: URL) -> URL? {
+        let fileComponents = fileURL.standardizedFileURL.pathComponents
+        return scannedFolders
+            .filter { root in
+                let rootComponents = root.standardizedFileURL.pathComponents
+                return fileComponents.count > rootComponents.count
+                    && Array(fileComponents.prefix(rootComponents.count)) == rootComponents
+            }
+            .max { $0.standardizedFileURL.pathComponents.count < $1.standardizedFileURL.pathComponents.count }
+    }
+
+    /// Starts security-scoped access on every scanned root, returning the
+    /// ones it acquired so the caller can release them. `fileImporter`
+    /// scopes each selected folder separately, so a multi-folder scan
+    /// holds one grant per folder and a write has to re-acquire all of
+    /// them — taking only the first would let files in that folder write
+    /// while every other folder failed.
+    ///
+    /// Returns nil if any root is unavailable, after releasing whatever
+    /// it already took: a partial grant is worse than none, since it
+    /// would half-apply a batch and report the rest as missing files.
+    private func beginAccessToAllRoots() -> [URL]? {
+        guard !scannedFolders.isEmpty else { return nil }
+        var accessed: [URL] = []
+        for root in scannedFolders {
+            guard root.startAccessingSecurityScopedResource() else {
+                for url in accessed { url.stopAccessingSecurityScopedResource() }
+                return nil
+            }
+            accessed.append(root)
+        }
+        return accessed
+    }
+
+    private func endAccess(_ roots: [URL]) {
+        for url in roots { url.stopAccessingSecurityScopedResource() }
+    }
+
     /// Distinct expected-artist folder names among the current scan's
     /// files, in first-seen order.
     private var distinctExpectedArtists: [String] {
@@ -195,14 +260,30 @@ final class LibraryScanner {
     /// An explicitly passed override always wins outright; detection only
     /// ever runs to fill in a nil.
     func scan(folder: URL, category: LibraryCategory, artistOverride: String? = nil) async {
-        let didAccess = folder.startAccessingSecurityScopedResource()
-        defer { if didAccess { folder.stopAccessingSecurityScopedResource() } }
+        await scan(folders: [folder], category: category, artistOverride: artistOverride)
+    }
+
+    /// Scans several roots as one library — Singles can be spread across
+    /// a folder per artist, and scanning their common parent instead
+    /// would mean walking everything else under it too.
+    ///
+    /// Each file keeps the root it came from (see `root(containing:)`),
+    /// so backups and duplicate moves land beside the file rather than
+    /// all being forced under whichever folder happened to be first.
+    ///
+    /// `artistOverride` and its auto-detection stay single-folder only:
+    /// both answer "which folder is the artist's own folder", which has
+    /// no single answer across several roots, and neither applies to
+    /// Singles in the first place.
+    func scan(folders: [URL], category: LibraryCategory, artistOverride: String? = nil) async {
+        let accessed = folders.filter { $0.startAccessingSecurityScopedResource() }
+        defer { endAccess(accessed) }
 
         state = .enumerating
         files = []
         scannedCount = 0
         totalCount = 0
-        scannedFolder = folder
+        scannedFolders = folders
         self.category = category
         self.artistOverride = artistOverride
         artistOverrideAutoDetected = false
@@ -223,18 +304,26 @@ final class LibraryScanner {
 
         lastRenameBatch = []
 
-        let urls = await Task.detached(priority: .userInitiated) {
-            Self.audioFileURLs(in: folder)
+        // Enumerated per root, keeping each file paired with the folder it
+        // came from — `expectedArtist` is measured relative to that root,
+        // so a multi-folder scan can't share one.
+        let roots = folders
+        let found = await Task.detached(priority: .userInitiated) {
+            roots.flatMap { root in
+                Self.audioFileURLs(in: root).map { (url: $0, root: root) }
+            }
         }.value
 
-        totalCount = urls.count
+        totalCount = found.count
 
         // Only try to auto-detect when the caller didn't already tell us —
         // an explicit override (including a rescan forwarding the stored
-        // one) always wins outright, nothing to detect.
+        // one) always wins outright, nothing to detect. Detection answers
+        // "was a single artist's own folder scanned directly", which a
+        // multi-folder scan doesn't pose, so it's skipped there.
         var effectiveArtistOverride = artistOverride
-        if artistOverride == nil, category == .albums,
-           let detected = Self.detectArtistFolderOverride(urls: urls, folder: folder) {
+        if artistOverride == nil, category == .albums, let folder = folders.first, folders.count == 1,
+           let detected = Self.detectArtistFolderOverride(urls: found.map(\.url), folder: folder) {
             effectiveArtistOverride = detected
             self.artistOverride = detected
             artistOverrideAutoDetected = true
@@ -245,24 +334,26 @@ final class LibraryScanner {
         // Read metadata with bounded concurrency so huge libraries stay responsive.
         let maxConcurrent = 8
         var results: [AudioFile] = []
-        results.reserveCapacity(urls.count)
+        results.reserveCapacity(found.count)
 
         await withTaskGroup(of: AudioFile.self) { group in
-            var iterator = urls.makeIterator()
+            var iterator = found.makeIterator()
             var inFlight = 0
 
-            while inFlight < maxConcurrent, let url = iterator.next() {
+            while inFlight < maxConcurrent, let next = iterator.next() {
+                let url = next.url
                 let expected = Self.expectedArtist(
-                    for: url, in: folder, override: effectiveArtistOverride, category: category)
+                    for: url, in: next.root, override: effectiveArtistOverride, category: category)
                 group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 inFlight += 1
             }
             for await file in group {
                 results.append(file)
                 scannedCount += 1
-                if let url = iterator.next() {
+                if let next = iterator.next() {
+                    let url = next.url
                     let expected = Self.expectedArtist(
-                        for: url, in: folder, override: effectiveArtistOverride, category: category)
+                        for: url, in: next.root, override: effectiveArtistOverride, category: category)
                     group.addTask { await Self.inspect(url, expectedArtist: expected, category: category) }
                 }
             }
@@ -293,7 +384,7 @@ final class LibraryScanner {
         files = []
         scannedCount = 0
         totalCount = 0
-        scannedFolder = nil
+        scannedFolders = []
         category = nil
         artistOverride = nil
         artistOverrideAutoDetected = false
@@ -336,19 +427,22 @@ final class LibraryScanner {
     /// covers, including this file.
     @discardableResult
     func applyTagChanges(_ changes: TagChanges, to file: AudioFile, backupFirst: Bool) async throws -> TagWriteError? {
-        guard let scannedFolder else {
+        guard let fileRoot = root(containing: file.url) else {
             throw TagWriteError.underlying(CocoaError(.fileNoSuchFile))
         }
 
-        guard scannedFolder.startAccessingSecurityScopedResource() else {
+        guard let accessed = beginAccessToAllRoots() else {
             throw TagWriteError.folderAccessUnavailable
         }
-        defer { scannedFolder.stopAccessingSecurityScopedResource() }
+        defer { endAccess(accessed) }
 
         var backupFailure: TagWriteError?
         if backupFirst {
             do {
-                try BackupManager.backupIfNeeded(fileURL: file.url, root: scannedFolder)
+                // Backed up under the file's *own* root, so a multi-folder
+                // scan leaves each artist folder's backups beside it
+                // instead of collecting them all under the first folder.
+                try BackupManager.backupIfNeeded(fileURL: file.url, root: fileRoot)
             } catch {
                 backupFailure = .backupFailed(error)
             }
@@ -357,7 +451,7 @@ final class LibraryScanner {
         try await TagWriterRouter.write(changes, to: file.url)
 
         let expected = Self.expectedArtist(
-            for: file.url, in: scannedFolder, override: artistOverride, category: file.category)
+            for: file.url, in: fileRoot, override: artistOverride, category: file.category)
         let updated = await Self.inspect(file.url, expectedArtist: expected, category: file.category)
         if let index = files.firstIndex(where: { $0.url == file.url }) {
             files[index] = updated
@@ -381,7 +475,7 @@ final class LibraryScanner {
     /// missing file doesn't abort the rest of the batch — and records what
     /// succeeded so "Undo Last Rename" can reverse it.
     func renameFiles(_ proposals: [RenameProposal]) async -> [RenameOperationResult] {
-        guard let scannedFolder else {
+        guard hasScannedFolder else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.currentName,
                                        proposedName: $0.proposedName,
@@ -389,14 +483,14 @@ final class LibraryScanner {
             }
         }
 
-        guard scannedFolder.startAccessingSecurityScopedResource() else {
+        guard let accessed = beginAccessToAllRoots() else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.currentName,
                                        proposedName: $0.proposedName,
                                        errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
             }
         }
-        defer { scannedFolder.stopAccessingSecurityScopedResource() }
+        defer { endAccess(accessed) }
 
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
@@ -438,7 +532,7 @@ final class LibraryScanner {
     /// pattern as `renameFiles` — and shares its undo batch, since both are
     /// just moves from one URL to another.
     func collectIntoFolders(_ proposals: [CollectionProposal]) async -> [RenameOperationResult] {
-        guard let scannedFolder else {
+        guard hasScannedFolder else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
                                        proposedName: $0.proposedRelativePath,
@@ -446,14 +540,14 @@ final class LibraryScanner {
             }
         }
 
-        guard scannedFolder.startAccessingSecurityScopedResource() else {
+        guard let accessed = beginAccessToAllRoots() else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
                                        proposedName: $0.proposedRelativePath,
                                        errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
             }
         }
-        defer { scannedFolder.stopAccessingSecurityScopedResource() }
+        defer { endAccess(accessed) }
 
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
@@ -498,7 +592,7 @@ final class LibraryScanner {
     /// needed), same pattern as `collectIntoFolders` — never deletes
     /// anything, and shares the same undo batch.
     func moveDuplicates(_ proposals: [DuplicateMoveProposal]) async -> [RenameOperationResult] {
-        guard let scannedFolder else {
+        guard hasScannedFolder else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
                                        proposedName: $0.proposedRelativePath,
@@ -506,21 +600,33 @@ final class LibraryScanner {
             }
         }
 
-        guard scannedFolder.startAccessingSecurityScopedResource() else {
+        guard let accessed = beginAccessToAllRoots() else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
                                        proposedName: $0.proposedRelativePath,
                                        errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
             }
         }
-        defer { scannedFolder.stopAccessingSecurityScopedResource() }
+        defer { endAccess(accessed) }
 
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
 
         for proposal in proposals {
             let oldURL = proposal.file.url
-            let newURL = scannedFolder.appendingPathComponent(proposal.proposedRelativePath)
+            // `proposedRelativePath` is relative to the file's own root
+            // (see `DuplicatePlanner.plan(for:roots:)`), so a duplicate
+            // moves into a "_CleanMyDigital Duplicates" folder inside the
+            // artist folder it came from — not into whichever folder
+            // happened to be selected first.
+            guard let fileRoot = root(containing: oldURL) else {
+                results.append(RenameOperationResult(
+                    originalURL: oldURL, currentName: proposal.file.fileName,
+                    proposedName: proposal.proposedRelativePath,
+                    errorDescription: "This file isn't inside any scanned folder."))
+                continue
+            }
+            let newURL = fileRoot.appendingPathComponent(proposal.proposedRelativePath)
             let destinationFolder = newURL.deletingLastPathComponent()
 
             do {
@@ -574,7 +680,7 @@ final class LibraryScanner {
     /// branches on that flag to update every file under the folder instead
     /// of looking for one exact URL.
     func renameAlbumFolders(_ proposals: [AlbumFolderRenameProposal]) async -> [RenameOperationResult] {
-        guard let scannedFolder else {
+        guard hasScannedFolder else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.group.folderURL, currentName: $0.currentFolderName,
                                        proposedName: $0.proposedFolderName,
@@ -582,14 +688,14 @@ final class LibraryScanner {
             }
         }
 
-        guard scannedFolder.startAccessingSecurityScopedResource() else {
+        guard let accessed = beginAccessToAllRoots() else {
             return proposals.map {
                 RenameOperationResult(originalURL: $0.group.folderURL, currentName: $0.currentFolderName,
                                        proposedName: $0.proposedFolderName,
                                        errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
             }
         }
-        defer { scannedFolder.stopAccessingSecurityScopedResource() }
+        defer { endAccess(accessed) }
 
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
@@ -638,16 +744,16 @@ final class LibraryScanner {
     /// whose parent folder is the moved folder, since there's no single
     /// file URL to match against like the other entry kinds.
     func undoLastFileOperation() async -> [RenameOperationResult] {
-        guard let scannedFolder, !lastRenameBatch.isEmpty else { return [] }
+        guard hasScannedFolder, !lastRenameBatch.isEmpty else { return [] }
 
-        guard scannedFolder.startAccessingSecurityScopedResource() else {
+        guard let accessed = beginAccessToAllRoots() else {
             return lastRenameBatch.map {
                 RenameOperationResult(originalURL: $0.newURL, currentName: $0.newURL.lastPathComponent,
                                        proposedName: $0.oldURL.lastPathComponent,
                                        errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
             }
         }
-        defer { scannedFolder.stopAccessingSecurityScopedResource() }
+        defer { endAccess(accessed) }
 
         var results: [RenameOperationResult] = []
         for entry in lastRenameBatch.reversed() {
@@ -748,7 +854,7 @@ final class LibraryScanner {
     /// with bounded concurrency like the initial scan, since this is
     /// CPU-bound decode+FFT work rather than a rate-limited network call.
     func analyzeSpectrum() {
-        guard !isAnalyzingSpectrum, let scannedFolder else { return }
+        guard !isAnalyzingSpectrum, hasScannedFolder else { return }
         let targets = files.filter(\.isReadable)
         guard !targets.isEmpty else { return }
 
@@ -762,7 +868,7 @@ final class LibraryScanner {
             // launched it, so access has to be released only once every
             // file has actually been read, not when `analyzeSpectrum()`
             // itself returns (immediately, after just starting the Task).
-            guard scannedFolder.startAccessingSecurityScopedResource() else {
+            guard let accessed = beginAccessToAllRoots() else {
                 let message = TagWriteError.folderAccessUnavailable.localizedDescription
                 for file in targets {
                     spectralResults[file.url] = .failed(message)
@@ -772,7 +878,7 @@ final class LibraryScanner {
                 spectralTask = nil
                 return
             }
-            defer { scannedFolder.stopAccessingSecurityScopedResource() }
+            defer { endAccess(accessed) }
 
             let maxConcurrent = 4
             await withTaskGroup(of: (URL, SpectralCutoffOutcome).self) { group in

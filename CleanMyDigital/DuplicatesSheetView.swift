@@ -165,9 +165,9 @@ struct DuplicatesSheetView: View {
     private func moveSelected() async {
         isBusy = true
         defer { isBusy = false }
-        guard let root = scanner.scannedFolder else { return }
+        guard scanner.hasScannedFolder else { return }
 
-        let allProposals = DuplicatePlanner.plan(for: groups, root: root)
+        let allProposals = DuplicatePlanner.plan(for: groups, roots: scanner.scannedFolders)
         let selected = allProposals.filter { selection.contains($0.file.url) }
         let outcomes = await scanner.moveDuplicates(selected)
 

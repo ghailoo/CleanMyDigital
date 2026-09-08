@@ -94,6 +94,21 @@ No required structure. Files can sit loose in one folder. The app expects filena
 roughly like `Artist - Title (Mix).flac`, and uses that convention when cleaning up
 search terms and proposing new filenames.
 
+**You can select several folders at once.** Singles are often filed one folder per
+artist, so in the Choose Folder dialog you can Cmd-click several artist folders and
+scan them together as one list — no need to scan their shared parent and wait for
+everything else underneath it.
+
+Each file stays associated with the folder it came from, so backups
+(`_CleanMyDigital Backups`) and moved duplicates (`_CleanMyDigital Duplicates`) are
+created inside that file's own folder rather than all being collected under one.
+Find Duplicates works across the whole selection, which is the point — it will catch
+the same track filed under two different artists.
+
+Multi-select is Singles-only. Albums and Compilations both derive meaning from the
+scanned folder's own structure (artist folders, one folder per release), so they
+still take one folder at a time.
+
 ### Compilations
 
 Group each compilation in its own folder. No artist-folder check is performed,

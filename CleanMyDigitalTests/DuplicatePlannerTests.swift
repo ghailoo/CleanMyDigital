@@ -86,10 +86,65 @@ struct DuplicatePlannerTests {
         let extra = Self.makeFile(path: "/Library/Singles/Artist/Sub/extra.mp3", artist: "Artist", title: "Title", bitrateKbps: 128)
 
         let groups = DuplicatePlanner.groups(for: [keeper, extra], cutoffHz: [:])
-        let proposals = DuplicatePlanner.plan(for: groups, root: root)
+        let proposals = DuplicatePlanner.plan(for: groups, roots: [root])
 
         #expect(proposals.count == 1)
         #expect(proposals.first?.proposedRelativePath == "_CleanMyDigital Duplicates/Sub/extra.mp3")
+    }
+
+    /// A Singles scan can cover several artist folders at once, and a
+    /// duplicate group spanning two of them is exactly the case that
+    /// motivates it — the same track filed under two artists. Each loser's
+    /// path has to be measured against the root it actually came from, so
+    /// it moves into a review folder inside its own artist folder rather
+    /// than being dragged under whichever folder was selected first.
+    @Test func planMeasuresEachFileAgainstItsOwnRootAcrossSeveralFolders() {
+        let rootA = URL(fileURLWithPath: "/Library/Singles/Artist A")
+        let rootB = URL(fileURLWithPath: "/Library/Singles/Artist B")
+        let keeper = Self.makeFile(
+            path: "/Library/Singles/Artist A/best.flac", artist: "Artist", title: "Title", bitrateKbps: 900)
+        let extra = Self.makeFile(
+            path: "/Library/Singles/Artist B/Sub/worse.mp3", artist: "Artist", title: "Title", bitrateKbps: 128)
+
+        let groups = DuplicatePlanner.groups(for: [keeper, extra], cutoffHz: [:])
+        let proposals = DuplicatePlanner.plan(for: groups, roots: [rootA, rootB])
+
+        #expect(proposals.count == 1)
+        // Relative to Artist B, the root the loser lives under — not to
+        // Artist A, which comes first in `roots`.
+        #expect(proposals.first?.proposedRelativePath == "_CleanMyDigital Duplicates/Sub/worse.mp3")
+    }
+
+    /// Nested selections resolve to the nearest enclosing root, matching
+    /// `LibraryScanner.root(containing:)` — otherwise a file could be
+    /// planned against an outer root while the move resolved it against
+    /// the inner one, sending it somewhere the preview never showed.
+    @Test func planPrefersTheDeepestRootWhenSelectionsAreNested() {
+        let outer = URL(fileURLWithPath: "/Library/Singles")
+        let inner = URL(fileURLWithPath: "/Library/Singles/Artist")
+        let keeper = Self.makeFile(
+            path: "/Library/Singles/Artist/keeper.flac", artist: "Artist", title: "Title", bitrateKbps: 900)
+        let extra = Self.makeFile(
+            path: "/Library/Singles/Artist/extra.mp3", artist: "Artist", title: "Title", bitrateKbps: 128)
+
+        let groups = DuplicatePlanner.groups(for: [keeper, extra], cutoffHz: [:])
+        let proposals = DuplicatePlanner.plan(for: groups, roots: [outer, inner])
+
+        #expect(proposals.first?.proposedRelativePath == "_CleanMyDigital Duplicates/extra.mp3")
+    }
+
+    /// A file outside every scanned root can't be given a meaningful
+    /// relative path, so it's dropped rather than guessed at.
+    @Test func planSkipsFilesOutsideEveryRoot() {
+        let root = URL(fileURLWithPath: "/Library/Singles/Artist A")
+        let keeper = Self.makeFile(
+            path: "/Elsewhere/keeper.flac", artist: "Artist", title: "Title", bitrateKbps: 900)
+        let extra = Self.makeFile(
+            path: "/Elsewhere/extra.mp3", artist: "Artist", title: "Title", bitrateKbps: 128)
+
+        let groups = DuplicatePlanner.groups(for: [keeper, extra], cutoffHz: [:])
+
+        #expect(DuplicatePlanner.plan(for: groups, roots: [root]).isEmpty)
     }
 
     // MARK: - Fixture

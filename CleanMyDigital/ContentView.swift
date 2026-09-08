@@ -89,10 +89,17 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 500)
         .toolbar { toolbarContent }
         .searchable(text: $searchText, prompt: "Search file, title, artist, album")
+        // Singles are commonly filed one folder per artist, so several can
+        // be scanned as one library rather than scanning their shared
+        // parent and walking everything else under it. Albums and
+        // Compilations stay single-folder: both derive meaning from the
+        // scanned folder's own structure (artist folders, one folder per
+        // release), which several unrelated roots would muddle.
         .fileImporter(isPresented: $showFolderPicker,
-                      allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result {
-                Task { await scanner.scan(folder: url, category: selectedCategory) }
+                      allowedContentTypes: [.folder],
+                      allowsMultipleSelection: selectedCategory == .singles) { result in
+            if case .success(let urls) = result, !urls.isEmpty {
+                Task { await scanner.scan(folders: urls, category: selectedCategory) }
             }
         }
         .fileExporter(isPresented: $showCSVExporter,
@@ -123,11 +130,17 @@ struct ContentView: View {
         .navigationSubtitle(navigationSubtitleText)
     }
 
+    /// One folder shows its path; several show a count instead, since
+    /// concatenating a handful of full paths into a window subtitle is
+    /// unreadable. The folder list itself stays visible in the results.
     private var navigationSubtitleText: String {
-        guard let scannedFolder = scanner.scannedFolder else { return "" }
-        let path = scannedFolder.path(percentEncoded: false)
-        guard let category = scanner.category else { return path }
-        return "\(path) — \(category.rawValue)"
+        let folders = scanner.scannedFolders
+        guard !folders.isEmpty else { return "" }
+        let location = folders.count == 1
+            ? folders[0].path(percentEncoded: false)
+            : "\(folders.count) folders"
+        guard let category = scanner.category else { return location }
+        return "\(location) — \(category.rawValue)"
     }
 
     // MARK: - States
@@ -564,14 +577,17 @@ struct ContentView: View {
         }
         ToolbarItem {
             Button("Rescan", systemImage: "arrow.clockwise") {
-                if let folder = scanner.scannedFolder {
+                // Re-scans every root the current scan covers, not just
+                // the first — a Singles scan can span several folders.
+                let folders = scanner.scannedFolders
+                if !folders.isEmpty {
                     Task {
-                        await scanner.scan(folder: folder, category: scanner.category ?? selectedCategory,
+                        await scanner.scan(folders: folders, category: scanner.category ?? selectedCategory,
                                             artistOverride: scanner.artistOverride)
                     }
                 }
             }
-            .disabled(scanner.scannedFolder == nil
+            .disabled(!scanner.hasScannedFolder
                       || scanner.state == .scanning || scanner.state == .enumerating)
         }
         ToolbarItem {
