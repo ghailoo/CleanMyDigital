@@ -590,6 +590,19 @@ struct ContentView: View {
 
     // MARK: - Toolbar
 
+    /// Four groups rather than one flat row of thirteen buttons. Those
+    /// thirteen weren't peers: four of them are a workflow — choose a
+    /// folder, scan it, search for what's missing, apply what was found —
+    /// and the rest are occasional tools. Flat and equally weighted, the
+    /// row overflowed, macOS dropped the labels, and the primary action
+    /// became genuinely hard to find.
+    ///
+    /// Grouping gets it to seven items, so every one keeps its text
+    /// label. The menus are named for what they do rather than a generic
+    /// "Tools": everything under Organize *moves or renames files on
+    /// disk*, everything under Check only *reads and reports* — which is
+    /// exactly what someone needs to know before opening an unfamiliar
+    /// one.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem {
@@ -600,42 +613,18 @@ struct ContentView: View {
             .fixedSize()
             .help("Tag the folder you're about to scan as Singles, Albums, or Compilations")
         }
-        ToolbarItem {
+
+        ToolbarItemGroup {
             Button("Choose Folder…", systemImage: "folder") {
                 showFolderPicker = true
             }
+            .help(selectedCategory == .singles
+                  ? "Choose one or more folders to scan — Singles can span several artist folders"
+                  : "Choose a folder to scan")
+            rescanControl
         }
-        ToolbarItem {
-            Button("Rescan", systemImage: "arrow.clockwise") {
-                // Re-scans every root the current scan covers, not just
-                // the first — a Singles scan can span several folders.
-                let folders = scanner.scannedFolders
-                if !folders.isEmpty {
-                    Task {
-                        await scanner.scan(folders: folders, category: scanner.category ?? selectedCategory,
-                                            artistOverride: scanner.artistOverride)
-                    }
-                }
-            }
-            .disabled(!scanner.hasScannedFolder
-                      || scanner.state == .scanning || scanner.state == .enumerating)
-        }
-        ToolbarItem {
-            Button("Copy Report", systemImage: "doc.on.clipboard") {
-                copyReport()
-            }
-            .disabled(scanner.files.isEmpty)
-            .help(needsScanHelp("Copy the list of files with missing metadata to the clipboard"))
-        }
-        ToolbarItem {
-            Button("Export CSV…", systemImage: "square.and.arrow.up") {
-                csvDocument = CSVDocument(text: csvReport())
-                showCSVExporter = true
-            }
-            .disabled(scanner.files.isEmpty)
-            .help(needsScanHelp("Export every scanned file's metadata as a CSV file"))
-        }
-        ToolbarItem {
+
+        ToolbarItemGroup {
             Button(scanner.isLookingUp ? "Stop" : "Find All Metadata",
                    systemImage: scanner.isLookingUp ? "stop.fill" : "magnifyingglass") {
                 if scanner.isLookingUp {
@@ -646,79 +635,119 @@ struct ContentView: View {
             }
             .disabled(!scanner.isLookingUp && !canFindAllMetadata)
             .help(findAllMetadataHelp)
-        }
-        ToolbarItem {
+
             Button("Apply Found Matches…", systemImage: "checkmark.circle") {
                 openWindow(id: "apply-found-matches")
             }
             .disabled(!canApplyFoundMatches)
             .help(applyFoundMatchesHelp)
         }
-        ToolbarItem {
-            Button("Rename Files…", systemImage: "textformat") {
-                openWindow(id: "rename-files")
+
+        ToolbarItemGroup {
+            organizeMenu
+            checkControl
+            exportMenu
+        }
+    }
+
+    /// "Treat This Folder as the Artist" *is* a rescan — the same
+    /// operation with a different artist derivation — so it hangs off the
+    /// Rescan button instead of sitting at the far end of the row looking
+    /// like an unrelated feature. Albums-only, since the override it sets
+    /// is ignored for every other category (see
+    /// `expectedArtist(for:in:override:category:)`); outside Albums there's
+    /// nothing to put in a menu, so this stays a plain button rather than
+    /// a one-item dropdown.
+    @ViewBuilder
+    private var rescanControl: some View {
+        if selectedCategory == .albums {
+            Menu {
+                Button("Rescan") { rescanCurrentFolders() }
+                Button("Rescan Treating This Folder as the Artist") {
+                    if let folder = scanner.scannedFolder { treatScannedFolderAsArtist(folder) }
+                }
+                .disabled(scanner.scannedFolder == nil)
+                .help(treatAsArtistHelp)
+            } label: {
+                Label("Rescan", systemImage: "arrow.clockwise")
+            } primaryAction: {
+                rescanCurrentFolders()
+            }
+            .menuIndicator(.visible)
+            .disabled(!canRescan)
+            .help(needsScanHelp("Re-read the scanned folders from disk"))
+        } else {
+            Button("Rescan", systemImage: "arrow.clockwise") { rescanCurrentFolders() }
+                .disabled(!canRescan)
+                .help(needsScanHelp("Re-read the scanned folders from disk"))
+        }
+    }
+
+    /// Everything here moves or renames files on disk. Each opens its own
+    /// preview-then-apply window, so the menu commits to nothing itself.
+    private var organizeMenu: some View {
+        Menu {
+            Button("Rename Files…") { openWindow(id: "rename-files") }
+            if selectedCategory == .singles {
+                Button("Collect into Folders…") { openWindow(id: "collect-into-folders") }
+            }
+            Button("Find Duplicates…") { openWindow(id: "find-duplicates") }
+        } label: {
+            Label("Organize", systemImage: "folder.badge.gearshape")
+        }
+        .disabled(scanner.files.isEmpty)
+        .help(needsScanHelp("Rename, group, or de-duplicate the scanned files"))
+    }
+
+    /// Read-only checks — nothing here writes. Collapses to a direct Stop
+    /// button while the spectral analysis runs: burying the stop for a
+    /// long-running job inside a menu would hide the one control that
+    /// matters while it's working.
+    @ViewBuilder
+    private var checkControl: some View {
+        if scanner.isAnalyzingSpectrum {
+            Button("Stop", systemImage: "stop.fill") { scanner.cancelSpectrumAnalysis() }
+                .help("Stop the spectral analysis — cutoffs measured so far are kept")
+        } else {
+            Menu {
+                if selectedCategory == .albums {
+                    Button("Check Album Completeness…") { openWindow(id: "check-album-completeness") }
+                }
+                Button("Check for Transcodes") { scanner.analyzeSpectrum() }
+            } label: {
+                Label("Check", systemImage: "checklist")
             }
             .disabled(scanner.files.isEmpty)
-            .help(needsScanHelp("Rename files to \"Artist - Title\" using their tags"))
+            .help(needsScanHelp("Check the scanned files for missing tracks or transcoded audio"))
         }
-        if selectedCategory == .singles {
-            ToolbarItem {
-                Button("Collect into Folders…", systemImage: "folder.badge.plus") {
-                    openWindow(id: "collect-into-folders")
-                }
-                .disabled(scanner.files.isEmpty)
-                .help(needsScanHelp("Group each Singles track's mixes into a subfolder named after the release"))
+    }
+
+    private var exportMenu: some View {
+        Menu {
+            Button("Copy Report") { copyReport() }
+            Button("Export CSV…") {
+                csvDocument = CSVDocument(text: csvReport())
+                showCSVExporter = true
             }
+        } label: {
+            Label("Export", systemImage: "square.and.arrow.up")
         }
-        Group {
-            ToolbarItem {
-                Button("Find Duplicates…", systemImage: "doc.on.doc") {
-                    openWindow(id: "find-duplicates")
-                }
-                .disabled(scanner.files.isEmpty)
-                .help(needsScanHelp("Find files sharing the same Artist and Title, and move the lower-quality copy aside"))
-            }
-            if selectedCategory == .albums {
-                ToolbarItem {
-                    Button("Check Album Completeness…", systemImage: "checklist") {
-                        openWindow(id: "check-album-completeness")
-                    }
-                    .disabled(scanner.files.isEmpty)
-                    .help(needsScanHelp("Check whether each scanned album folder has its full tracklist"))
-                }
-            }
-            ToolbarItem {
-                Button(scanner.isAnalyzingSpectrum ? "Stop" : "Check for Transcodes",
-                       systemImage: scanner.isAnalyzingSpectrum ? "stop.fill" : "waveform.badge.exclamationmark") {
-                    if scanner.isAnalyzingSpectrum {
-                        scanner.cancelSpectrumAnalysis()
-                    } else {
-                        scanner.analyzeSpectrum()
-                    }
-                }
-                .disabled(!scanner.isAnalyzingSpectrum && scanner.files.isEmpty)
-                .help(scanner.isAnalyzingSpectrum
-                      ? "Stop the spectral analysis — cutoffs measured so far are kept"
-                      : needsScanHelp("Measure each file's real frequency cutoff to flag likely transcoded/fake-quality files"))
-            }
-            // Albums-only, because the override it sets is Albums-only:
-            // `expectedArtist(for:in:override:category:)` ignores it for
-            // every other category. Shown in all three, it rescanned the
-            // folder and changed nothing — the worst kind of failure,
-            // since the app looked like it had obeyed. This matches the
-            // "Expected Artist" column, which is already Albums-only.
-            if selectedCategory == .albums {
-                ToolbarItem {
-                    Button("Treat This Folder as the Artist", systemImage: "person.crop.square") {
-                        if let folder = scanner.scannedFolder {
-                            treatScannedFolderAsArtist(folder)
-                        }
-                    }
-                    .disabled(scanner.scannedFolder == nil
-                              || scanner.state == .scanning || scanner.state == .enumerating)
-                    .help(treatAsArtistHelp)
-                }
-            }
+        .disabled(scanner.files.isEmpty)
+        .help(needsScanHelp("Copy the results as text, or export them as a CSV file"))
+    }
+
+    private var canRescan: Bool {
+        scanner.hasScannedFolder && scanner.state != .scanning && scanner.state != .enumerating
+    }
+
+    /// Re-scans every root the current scan covers, not just the first —
+    /// a Singles scan can span several folders.
+    private func rescanCurrentFolders() {
+        let folders = scanner.scannedFolders
+        guard !folders.isEmpty else { return }
+        Task {
+            await scanner.scan(folders: folders, category: scanner.category ?? selectedCategory,
+                                artistOverride: scanner.artistOverride)
         }
     }
 

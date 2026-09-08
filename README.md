@@ -81,8 +81,9 @@ YourLibraryFolder/
   quiet grey confirmation line.
 
 If auto-detection doesn't fire but should — for example when there's an extra level
-like `Artist Name/Studio Albums/Album Name/` — use the **"Treat This Folder as the
-Artist"** toolbar button, or the yellow banner's fix button if it appears.
+like `Artist Name/Studio Albums/Album Name/` — use **Rescan ▾ → "Rescan Treating
+This Folder as the Artist"** in the toolbar, or the yellow banner's fix button if
+it appears.
 
 **The Artist Mismatch flag** compares each file's Artist tag against its artist
 folder. A tag that *extends* the folder name is fine — "Anouar Brahem Trio" filed
@@ -129,51 +130,64 @@ being silently skipped.
 
 ---
 
-## The toolbar, button by button
+## The toolbar
 
-### Always available
+The toolbar reads left to right as the actual workflow, then three menus of
+occasional tools.
 
-**Choose Folder…** — pick a folder and scan it.
+### The workflow
 
-**Rescan** — re-read the same folder. Use this after changing files outside the app.
+**Choose Folder…** — pick a folder and scan it. For Singles you can select several
+folders at once (see Folder structure above).
+
+**Rescan** — re-read the scanned folders from disk. Use this after changing files
+outside the app. In Albums, the arrow beside it also offers **Rescan Treating This
+Folder as the Artist**, for structures auto-detection doesn't recognize.
 
 **Find All Metadata** (magnifying glass) — searches Discogs and MusicBrainz for
 every flagged file. **This only searches; it writes nothing.** Watch the Lookup
 column fill in with "Found" or "No match."
 
 **Apply Found Matches…** (checkmark in a circle) — this is the one that actually
-writes. It opens a window listing every file that got a match, and writes the
-Artist / Album / Year / Genre / Artwork fields the search found. Title and Track
-Number for Discogs matches still need the per-file tracklist step below.
+writes. It opens a window showing what each file's match would change, field by
+field, and writes the Artist / Album / Year / Genre / Artwork fields the search
+found. Title and Track Number for Discogs matches still need the per-file
+tracklist step below.
 
 > Find All Metadata and Apply Found Matches are a pair. Searching alone changes
 > nothing on disk.
+
+### Organize — everything here moves or renames files
 
 **Rename Files…** — proposes new filenames from the tags. Singles become
 `Artist - Title (Mix)`; Albums and Compilations become `01 Artist - Title`.
 Preview before applying.
 
+**Collect into Folders…** *(Singles only)* — groups a track's different mixes into
+a subfolder named after the release.
+
 **Find Duplicates…** — groups files sharing the same Artist and Title, keeps the
 highest real quality (measured frequency cutoff first, then bitrate), and offers to
 move the rest into a `_CleanMyDigital Duplicates` folder. Nothing is ever deleted.
 
+### Check — everything here only reads and reports
+
+**Check Album Completeness…** *(Albums only)* — see below.
+
 **Check for Transcodes** — measures each file's real frequency cutoff. A file
 claiming to be lossless but cutting off below ~17 kHz was probably re-encoded from
-a lower-quality source. Results appear in the Cutoff column.
+a lower-quality source. Results appear in the Cutoff column. While it runs, this
+menu becomes a **Stop** button.
+
+### Export
 
 **Copy Report** / **Export CSV…** — get the results out as text or a spreadsheet.
 
-**Treat This Folder as the Artist** — rescans the current folder using its own name
-as the artist, for structures auto-detection doesn't recognize.
+### Greyed out?
 
-### Singles only
-
-**Collect into Folders…** — groups a track's different mixes into a subfolder named
-after the release.
-
-### Albums only
-
-**Check Album Completeness…** — see below.
+Hover any dimmed button — its tooltip says what's blocking it. Most often it's
+"scan a folder first", or, for Find All Metadata, a missing Discogs token or
+MusicBrainz contact email in Settings.
 
 ### Right-click any row
 
