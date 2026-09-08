@@ -32,9 +32,12 @@ struct MusicBrainzClientSearchTests {
         #expect(MusicBrainzQuery(for: file).album == "Greatest Hits")
     }
 
-    @Test func queryAlbumIsEmptyWhenFileHasNoAlbumTag() {
+    /// `MusicBrainzQuery.album` goes through `MetadataQuery.albumSearchTerm(for:)`
+    /// — an empty Album tag falls back to the file's own containing folder
+    /// name ("Greatest Hits" for this fixture's path), not an empty string.
+    @Test func queryAlbumFallsBackToTheContainingFolderNameWhenFileHasNoAlbumTag() {
         let file = Self.makeFile(album: nil)
-        #expect(MusicBrainzQuery(for: file).album == "")
+        #expect(MusicBrainzQuery(for: file).album == "Greatest Hits")
     }
 
     // MARK: - Fixture

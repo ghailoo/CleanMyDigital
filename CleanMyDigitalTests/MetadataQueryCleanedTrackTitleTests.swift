@@ -88,6 +88,29 @@ struct MetadataQueryCleanedTrackTitleTests {
         #expect(cleaned == "[Anouar Brahem] Raf Raf")
     }
 
+    /// The real-world case this fixes: for `.compilations`, `artist` is
+    /// forced to "Various" (see `DiscogsQuery`'s doc comment), which could
+    /// never fuzzily match a real per-track artist like "Ice MC" — so the
+    /// fuzzy-match gate the other categories use would leave the bracket
+    /// in place forever. Compilations strip it unconditionally instead,
+    /// since a leading "[Artist Name]" there is the per-track artist by
+    /// convention.
+    @Test func compilationsStripTheBracketedPrefixUnconditionallyEvenWhenItDoesNotMatchTheArtist() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "(01) [Ice MC] It's A Rainy Day (Euro Club Mix).flac", artist: "Various", category: .compilations)
+        #expect(cleaned == "It's A Rainy Day (Euro Club Mix)")
+    }
+
+    /// Regression: only `.compilations` strips unconditionally — the other
+    /// categories must still leave a non-matching bracket alone.
+    @Test func singlesAndAlbumsStillGateTheBracketStripOnAFuzzyArtistMatch() {
+        for category: LibraryCategory in [.singles, .albums] {
+            let cleaned = MetadataQuery.cleanedTrackTitle(
+                from: "[Ice MC] It's A Rainy Day.flac", artist: "Various", category: category)
+            #expect(cleaned == "[Ice MC] It's A Rainy Day")
+        }
+    }
+
     @Test func bracketedTextIsOnlyStrippedNearTheStartNotLaterInTheTitle() {
         // "near the start" — anchored to the very beginning of the
         // (track-number-stripped) name, not matched anywhere in the string,

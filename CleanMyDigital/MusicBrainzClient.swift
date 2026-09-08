@@ -233,14 +233,14 @@ enum MusicBrainzClient {
 struct MusicBrainzQuery {
     let artist: String
     let recording: String
-    /// The file's own Album tag, if present — an initial guess to narrow
-    /// the search on Albums/Compilations files. Empty when the file has no
-    /// Album tag yet, same as `artist`/`recording` fall back to an empty guess.
+    /// The file's own Album tag when it has one, else its containing
+    /// folder name, with a trailing disc/CD marker stripped either way —
+    /// see `MetadataQuery.albumSearchTerm(for:)`.
     let album: String
 
     init(for file: AudioFile) {
         artist = MetadataQuery.artist(for: file)
         recording = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
-        album = file.album ?? ""
+        album = MetadataQuery.albumSearchTerm(for: file)
     }
 }
