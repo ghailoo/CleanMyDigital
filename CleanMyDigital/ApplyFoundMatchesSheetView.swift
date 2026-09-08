@@ -5,18 +5,41 @@
 
 import SwiftUI
 
-/// Applies every file's "Find All Metadata" batch-lookup match at once —
-/// no per-file review, since the search already computed exactly which
-/// fields (`LookupOutcome.found`'s `fillableFields`) each candidate can
-/// fill. Writes sequentially via `scanner.applyTagChanges`, same as every
-/// other batch write action in this codebase (`AlbumComparisonView.applyToAlbum()`,
-/// `CollectSheetView`, `DuplicatesSheetView`) — never parallelized.
+/// Reviews and applies "Find All Metadata" batch-lookup matches —
+/// `LibraryScanner.lookupOutcome` picks `releases.first` with no human
+/// review, so this is where a wrong first hit gets caught before it's
+/// written, rather than applied silently. Grouped by folder (`List`/
+/// `Section`, same pattern as `DuplicatesSheetView`), since a 12-track
+/// album resolves to 12 rows all sharing one release — reviewing and
+/// correcting those one at a time is unusable. Writes sequentially via
+/// `scanner.applyTagChanges`, same as every other batch write action in
+/// this codebase (`AlbumComparisonView.applyToAlbum()`, `CollectSheetView`,
+/// `DuplicatesSheetView`) — never parallelized.
+///
+/// Two correction paths, since they're genuinely different jobs:
+/// - Per file: opens the existing per-file `MetadataLookupView`, where the
+///   user can re-search with corrected terms and apply.
+/// - Per folder (Albums/Compilations only — see `FoundMatchGroup.albumGroup`):
+///   opens the existing `AlbumMetadataLookupView` for that folder's
+///   `AlbumGroup`, which searches once, matches every file in the folder
+///   against the chosen release's tracklist, and applies to all of them —
+///   the right tool when the batch picked the wrong release for a whole
+///   album/compilation, the common failure mode.
+///
+/// The release/recording identity (title, year, genre, format, label,
+/// cover, provider link) is shown once per *section*, not once per file —
+/// every file in a folder found the same match, so repeating it per row
+/// just crowds out the one thing that actually varies file to file: how
+/// each file's own tags compare to it. That per-file comparison is a
+/// disclosure — collapsed by default (a batch can hold 30+ files) showing
+/// a compact, real-valued summary of what's actually changing, expandable
+/// to the full field-by-field table.
 ///
 /// Discogs matches here never fill Title/Track Number — Discogs search
 /// results are release-level only (see `DiscogsRelease.fillableFields`'s
-/// own doc comment). That's an existing, accepted limitation; the per-file
-/// "Find Metadata…" flow's tracklist-match step remains the way to fill
-/// those for a Discogs match.
+/// own doc comment). That's an existing, accepted limitation; either
+/// correction path's tracklist-match step remains the way to fill those
+/// for a Discogs match.
 struct ApplyFoundMatchesSheetView: View {
     let scanner: LibraryScanner
 
@@ -39,12 +62,48 @@ struct ApplyFoundMatchesSheetView: View {
     @State private var isApplying = false
     @State private var outcomesByURL: [URL: ApplyOutcome] = [:]
     @State private var applySummary: String?
+    @State private var selection: Set<URL> = []
+    /// Every target URL `selection` has ever been synced against — lets
+    /// `syncSelection()` tell "a file that's new since last sync" (start it
+    /// selected, per "all selected by default") apart from "a file the
+    /// user explicitly deselected earlier and is still here" (leave it
+    /// alone), rather than only being able to reset to "everything" or
+    /// "nothing".
+    @State private var knownTargetURLs: Set<URL> = []
+    @State private var metadataLookupFile: AudioFile?
+    @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
+    @State private var albumLookupGroup: AlbumGroup?
+    /// Which files' full before/after comparison table is expanded — all
+    /// collapsed by default, since a batch can hold 30+ files and a full
+    /// field table per row would be unreadable at that scale. The
+    /// collapsed summary (see `collapsedSummary`) is the fast "is this the
+    /// right record?" check, naming real changed values, not just field
+    /// names; expanding is for when it looks wrong.
+    ///
+    /// Rendered as an explicit chevron `Button`, not a `DisclosureGroup` —
+    /// a `DisclosureGroup`'s built-in triangle reads as basically invisible
+    /// next to a wide multi-line custom label inside a `List` row, which
+    /// made the whole affordance easy to miss entirely. Same underlying
+    /// per-file expand/collapse state and behavior either way; only the
+    /// visual affordance changed, to make it unmistakable.
+    @State private var expandedFileURLs: Set<URL> = []
 
     /// Every scanned file with a `.found` batch-lookup outcome, in table
     /// order. Recomputed live, so a file drops off this list the moment
-    /// it's applied (`applyTagChanges` clears its `lookupResults` entry).
+    /// it's applied (`applyTagChanges` clears its `lookupResults` entry) —
+    /// including via either correction path, which both apply through the
+    /// same `scanner.applyTagChanges`.
     private var targets: [AudioFile] {
         scanner.files.filter { scanner.lookupResults[$0.url]?.isFound == true }
+    }
+
+    /// Recomputed live alongside `targets`, same reasoning.
+    private var groups: [FoundMatchGroup] {
+        FoundMatchPlanner.groups(targets: targets, albumGroups: AlbumCompletenessChecker.groups(for: scanner.files))
+    }
+
+    private var selectedTargets: [AudioFile] {
+        targets.filter { selection.contains($0.url) }
     }
 
     var body: some View {
@@ -55,15 +114,25 @@ struct ApplyFoundMatchesSheetView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 640, idealWidth: 760, maxWidth: .infinity,
-               minHeight: 440, idealHeight: 560, maxHeight: .infinity)
+        .frame(minWidth: 640, idealWidth: 780, maxWidth: .infinity,
+               minHeight: 440, idealHeight: 600, maxHeight: .infinity)
+        .onAppear { syncSelection() }
+        .onChange(of: scanner.lookupCompletedCount) { syncSelection() }
+        .sheet(item: $metadataLookupFile) { file in
+            MetadataLookupView(file: file, scanner: scanner, initialProvider: metadataLookupInitialProvider)
+                .onDisappear { syncSelection() }
+        }
+        .sheet(item: $albumLookupGroup) { group in
+            AlbumMetadataLookupView(group: group, scanner: scanner)
+                .onDisappear { syncSelection() }
+        }
     }
 
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Apply Found Matches").font(.headline)
-                Text("Writes the Artist/Album/Year/Genre/Artwork fields each file's batch lookup already found. Title and Track Number for Discogs matches still need the per-file tracklist match.")
+                Text("Review what each file's batch lookup found before writing it. \"Correct…\" re-searches one file; \"Re-match…\" re-searches a whole album/compilation.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -79,31 +148,448 @@ struct ApplyFoundMatchesSheetView: View {
             ContentUnavailableView {
                 Label("No Found Matches", systemImage: "magnifyingglass")
             } description: {
-                Text("Run \"Find All Metadata\" first, then come back here to apply what it found.")
+                Text("Run \"Find All Metadata\" first, then come back here to review and apply what it found.")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(targets) { file in
-                fileRow(file)
+            List {
+                ForEach(groups) { group in
+                    Section {
+                        ForEach(group.files) { file in
+                            fileRow(file)
+                        }
+                    } header: {
+                        sectionHeader(group)
+                    }
+                }
             }
             .listStyle(.inset)
         }
     }
 
-    private func fileRow(_ file: AudioFile) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(file.fileName).lineLimit(1)
-                if let provider = scanner.lookupResults[file.url]?.provider {
-                    Text("Found via \(provider.rawValue)")
+    // MARK: - Section header (folder identity + the shared match identity)
+
+    private func sectionHeader(_ group: FoundMatchGroup) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
+                Toggle("", isOn: sectionSelectionBinding(for: group))
+                    .labelsHidden()
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(sectionTitle(for: group)).font(.subheadline.weight(.semibold))
+                    Text(sectionSubtitle(for: group))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+                Spacer()
+                if let albumGroup = group.albumGroup {
+                    Button("Re-match \(albumGroup.category == .compilations ? "Compilation" : "Album")…") {
+                        albumLookupGroup = albumGroup
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
             }
-            Spacer()
-            outcomeLabel(for: file)
+            // Every file in this folder found the same match — shown once
+            // here rather than repeated on every row below.
+            if let match = representativeMatch(for: group) {
+                matchIdentity(candidate: match.candidate)
+                    .padding(.leading, 26)
+            }
         }
-        .padding(.vertical, 2)
+        .padding(.bottom, 2)
+    }
+
+    private func sectionTitle(for group: FoundMatchGroup) -> String {
+        group.albumGroup?.albumTitle ?? group.folderURL.lastPathComponent
+    }
+
+    /// Deliberately doesn't say "N tracks matched to this release" for a
+    /// Singles folder (`albumGroup == nil`) — Singles are typically loose
+    /// files that each resolve to their own, unrelated release, so
+    /// implying they share one would be misleading. Albums/Compilations
+    /// genuinely do share one release, so that's worth saying explicitly.
+    private func sectionSubtitle(for group: FoundMatchGroup) -> String {
+        guard let albumGroup = group.albumGroup else {
+            return "\(group.files.count) file(s) in this folder"
+        }
+        let noun = albumGroup.category == .compilations ? "compilation" : "album"
+        return "\(group.files.count) file(s) matched — correct the whole \(noun) if the release is wrong"
+    }
+
+    private func sectionSelectionBinding(for group: FoundMatchGroup) -> Binding<Bool> {
+        Binding(
+            get: { group.files.allSatisfy { selection.contains($0.url) } },
+            set: { isOn in
+                for file in group.files {
+                    if isOn { selection.insert(file.url) } else { selection.remove(file.url) }
+                }
+            }
+        )
+    }
+
+    /// The match every file in `group` (that has one) resolved to, for the
+    /// section header's shared identity block — just the first file's, on
+    /// the assumption (true in practice: they were all searched from the
+    /// same folder/album context) that a folder's files converge on one
+    /// release. If a folder's files genuinely found different releases,
+    /// this shows whichever was found first; each row's own "Correct…"
+    /// still operates on that file specifically regardless.
+    private func representativeMatch(
+        for group: FoundMatchGroup
+    ) -> (provider: MetadataProvider, candidate: LookupCandidate, fillable: Set<MetadataField>)? {
+        group.files.lazy.compactMap { found(for: $0) }.first
+    }
+
+    // MARK: - File row
+
+    /// This file's `.found` outcome, split into its three associated
+    /// values — computed once per row rather than re-pattern-matching
+    /// `scanner.lookupResults[file.url]` separately for the comparison
+    /// table, the disclosure summary, and the "Correct…" button.
+    private func found(for file: AudioFile) -> (provider: MetadataProvider, candidate: LookupCandidate, fillable: Set<MetadataField>)? {
+        guard case .found(let provider, let candidate, let fillable) = scanner.lookupResults[file.url] else { return nil }
+        return (provider, candidate, fillable)
+    }
+
+    private func fileRow(_ file: AudioFile) -> some View {
+        let found = found(for: file)
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: selectionBinding(for: file.url))
+                    .labelsHidden()
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.fileName).font(.callout).lineLimit(1)
+                    outcomeLabel(for: file)
+                }
+
+                Spacer()
+
+                Button("Correct…") {
+                    metadataLookupInitialProvider = found?.provider ?? .discogs
+                    metadataLookupFile = file
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
+            if let found {
+                let comparisons = MatchComparisonBuilder.comparisons(
+                    file: file, candidate: found.candidate, fillable: found.fillable)
+                disclosure(for: file, comparisons: comparisons, candidate: found.candidate, provider: found.provider)
+                    .padding(.leading, 26)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    /// The visible expand/collapse control plus its content — see
+    /// `expandedFileURLs`'s doc comment for why this is a plain `Button`
+    /// with its own chevron rather than a `DisclosureGroup`.
+    private func disclosure(
+        for file: AudioFile, comparisons: [MatchComparison], candidate: LookupCandidate, provider: MetadataProvider
+    ) -> some View {
+        let isExpanded = expandedFileURLs.contains(file.url)
+        return VStack(alignment: .leading, spacing: 4) {
+            Button {
+                if isExpanded { expandedFileURLs.remove(file.url) } else { expandedFileURLs.insert(file.url) }
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                        .padding(.top, 3)
+                    collapsedSummary(comparisons)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                comparisonTable(comparisons, file: file, candidate: candidate, provider: provider)
+                    .padding(.leading, 16)
+            }
+        }
+    }
+
+    private func selectionBinding(for url: URL) -> Binding<Bool> {
+        Binding(
+            get: { selection.contains(url) },
+            set: { isOn in
+                if isOn { selection.insert(url) } else { selection.remove(url) }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func artworkThumbnail(for candidate: LookupCandidate, size: CGFloat = 40) -> some View {
+        let url: URL? = switch candidate {
+        case .discogs(let release): release.coverImageURL ?? release.thumbURL
+        case .musicBrainz(let recording): recording.coverArtURL
+        }
+        AsyncImage(url: url) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Rectangle().fill(Color.gray.opacity(0.2))
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    /// The match's own identity — release/recording title, artist, year,
+    /// genre, and (Discogs only, since `MusicBrainzRecording` carries
+    /// neither) format and label — plus cover art and, for Discogs, a link
+    /// to the release page so a questionable match can be checked against
+    /// the real thing. Shown once per section (see `sectionHeader`); this
+    /// answers "which record was found," while each file's own disclosure
+    /// answers "how does it compare to what's already here."
+    @ViewBuilder
+    private func matchIdentity(candidate: LookupCandidate) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            artworkThumbnail(for: candidate)
+            switch candidate {
+            case .discogs(let release):
+                VStack(alignment: .leading, spacing: 2) {
+                    // `release.title` is already "Artist - Release Title" —
+                    // Discogs' own combined format (see `DiscogsRelease.title`'s
+                    // doc comment) — same as `DiscogsResultRow` shows it.
+                    Text(release.title).font(.caption).lineLimit(1).help(release.title)
+                    HStack(spacing: 6) {
+                        if let year = release.year, !year.isEmpty { Text(year) }
+                        if !release.combinedGenre.isEmpty {
+                            Text(release.combinedGenre).lineLimit(1).help(release.combinedGenre)
+                        }
+                        if !release.formattedFormat.isEmpty { Text(release.formattedFormat) }
+                        if let label = release.label?.first { Text(label) }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    if let url = release.releasePageURL {
+                        Link("View on Discogs.com", destination: url).font(.caption2)
+                    }
+                }
+            case .musicBrainz(let recording):
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(recording.artistNames) — \(recording.title)").font(.caption).lineLimit(1)
+                    HStack(spacing: 6) {
+                        if let releaseTitle = recording.releaseTitle, !releaseTitle.isEmpty { Text(releaseTitle) }
+                        if let year = recording.yearString { Text(year) }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    // MARK: - Comparison summary (collapsed) and table (expanded)
+
+    /// The collapsed disclosure label — real values, not verdicts. Leads
+    /// with every field that's actually changing (`.willFill`/
+    /// `.differsButKept`), each shown as "Field: current → match", since
+    /// that's the concrete question this whole sheet exists to answer;
+    /// agreeing fields follow as a compact confirmation line, since
+    /// agreement (especially on Album/Year) is the strongest signal a
+    /// match is correct even though it isn't itself actionable. Fields
+    /// with nothing to compare (`.noMatchData`) are left for the expanded
+    /// table — they don't inform "is this right?" either way.
+    private func collapsedSummary(_ comparisons: [MatchComparison]) -> some View {
+        let changed = comparisons.filter { $0.outcome == .willFill || $0.outcome == .differsButKept }
+        let agreed = comparisons.filter { $0.outcome == .agrees }
+        return VStack(alignment: .leading, spacing: 2) {
+            if changed.isEmpty {
+                Text("No changes — every comparable field already agrees or has nothing to compare")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(changed) { comparison in
+                    changeSummaryLine(comparison)
+                }
+            }
+            if !agreed.isEmpty {
+                Text("Agrees: \(agreed.map(\.field.rawValue).joined(separator: ", "))")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+            }
+        }
+    }
+
+    private func changeSummaryLine(_ comparison: MatchComparison) -> some View {
+        let current = displayValue(comparison, isMatch: false)
+        let match = displayValue(comparison, isMatch: true)
+        let text = "\(comparison.field.rawValue): \(current) → \(match)"
+        return HStack(spacing: 4) {
+            outcomeIndicator(comparison.outcome)
+            Text(text)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(text)
+            Text(comparison.outcome == .willFill ? "will fill" : "kept (already set)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The real string for one side of a comparison, for display — "none"/
+    /// "cover" for Artwork (which has no literal value, only presence; see
+    /// `MatchComparisonBuilder.artworkComparison`'s doc comment), the
+    /// unavailability note on the match side when there's genuinely
+    /// nothing to compare, else an em dash. Never omits an empty value —
+    /// that's the whole point of showing a pair rather than a verdict.
+    private func displayValue(_ comparison: MatchComparison, isMatch: Bool) -> String {
+        let raw = isMatch ? comparison.matchValue : comparison.currentValue
+        if comparison.field == .artwork {
+            return raw == nil ? "none" : "cover"
+        }
+        if let raw, !raw.isEmpty { return raw }
+        if isMatch, let note = comparison.unavailableNote { return note }
+        return "–"
+    }
+
+    private func comparisonTable(
+        _ comparisons: [MatchComparison], file: AudioFile, candidate: LookupCandidate, provider: MetadataProvider
+    ) -> some View {
+        // Changed fields first (what someone opened this for), agreements
+        // after (confirmation, condensed), no-data fields last (context
+        // only — nothing to act on or compare).
+        let ordered = comparisons.sorted { lhs, rhs in
+            priority(lhs.outcome) < priority(rhs.outcome)
+        }
+        return VStack(spacing: 0) {
+            ForEach(ordered) { comparison in
+                if comparison.field == .artwork {
+                    artworkComparisonRow(comparison, file: file, candidate: candidate, providerLabel: provider.rawValue)
+                } else {
+                    MetadataComparisonRow(
+                        fieldLabel: comparison.field.rawValue, currentValue: comparison.currentValue,
+                        matchColumnLabel: provider.rawValue, matchValue: comparison.matchValue,
+                        matchPlaceholder: comparison.unavailableNote, isCondensed: comparison.outcome == .agrees
+                    ) {
+                        outcomeIndicator(comparison.outcome)
+                    }
+                }
+                if comparison.id != ordered.last?.id { Divider() }
+            }
+        }
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.top, 4)
+    }
+
+    private func priority(_ outcome: MatchComparison.Outcome) -> Int {
+        switch outcome {
+        case .willFill: 0
+        case .differsButKept: 1
+        case .agrees: 2
+        case .noMatchData: 3
+        }
+    }
+
+    /// Artwork can't go through `MetadataComparisonRow`'s plain-text
+    /// columns — it needs real thumbnails, not the presence placeholder
+    /// `MatchComparisonBuilder` uses internally for its outcome
+    /// classification — so this renders them directly from `file`/
+    /// `candidate` while still reusing `comparison.outcome` for the
+    /// trailing indicator. Each side always shows something — a real
+    /// thumbnail or an explicit "empty" placeholder — never a bare dash,
+    /// so it's never ambiguous which image (if either) is which.
+    private func artworkComparisonRow(
+        _ comparison: MatchComparison, file: AudioFile, candidate: LookupCandidate, providerLabel: String
+    ) -> some View {
+        let matchURL: URL? = switch candidate {
+        case .discogs(let release): release.coverImageURL ?? release.thumbURL
+        case .musicBrainz(let recording): recording.coverArtURL
+        }
+        return HStack(alignment: .top) {
+            Text(MetadataField.artwork.rawValue)
+                .font(.subheadline.weight(.medium))
+                .frame(width: 100, alignment: .leading)
+            artworkSlot(caption: "Current", isEmpty: file.artworkThumbnail == nil) {
+                if let thumbnail = file.artworkThumbnail {
+                    Image(nsImage: thumbnail).resizable().aspectRatio(contentMode: .fit)
+                }
+            }
+            artworkSlot(caption: providerLabel, isEmpty: matchURL == nil) {
+                if let matchURL {
+                    AsyncImage(url: matchURL) { image in
+                        image.resizable().aspectRatio(contentMode: .fit)
+                    } placeholder: {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            outcomeIndicator(comparison.outcome)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    /// One labeled artwork slot — the image `content` builds when
+    /// `isEmpty` is false, or an explicit dashed "None" placeholder at the
+    /// same size when it's true, so an empty slot always reads as
+    /// "confirmed empty" rather than "loading" or "missing by accident."
+    /// `isEmpty` is passed explicitly rather than inferred from `content`,
+    /// since a `@ViewBuilder if/else` never actually produces `EmptyView`
+    /// itself — it produces `_ConditionalContent`, which can't be checked
+    /// against a concrete type this way.
+    private func artworkSlot<Content: View>(
+        caption: String, isEmpty: Bool, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.secondary.opacity(0.35),
+                                  style: StrokeStyle(lineWidth: 1, dash: isEmpty ? [3] : []))
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(isEmpty ? 0.05 : 0)))
+                if isEmpty {
+                    Text("None").font(.system(size: 8)).foregroundStyle(.tertiary)
+                } else {
+                    content()
+                }
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            Text(caption).font(.caption2).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func outcomeIndicator(_ outcome: MatchComparison.Outcome) -> some View {
+        Image(systemName: outcomeSymbol(outcome))
+            .foregroundStyle(outcomeColor(outcome))
+            .help(outcomeWord(outcome))
+    }
+
+    private func outcomeSymbol(_ outcome: MatchComparison.Outcome) -> String {
+        switch outcome {
+        case .willFill: "arrow.down.circle.fill"
+        case .agrees: "checkmark.circle.fill"
+        case .differsButKept: "exclamationmark.circle.fill"
+        case .noMatchData: "minus.circle"
+        }
+    }
+
+    private func outcomeColor(_ outcome: MatchComparison.Outcome) -> Color {
+        switch outcome {
+        case .willFill: .blue
+        case .agrees: .green
+        case .differsButKept: .orange
+        case .noMatchData: .secondary
+        }
+    }
+
+    private func outcomeWord(_ outcome: MatchComparison.Outcome) -> String {
+        switch outcome {
+        case .willFill: "Will fill"
+        case .agrees: "Agrees"
+        case .differsButKept: "Differs, kept"
+        case .noMatchData: "No data"
+        }
     }
 
     @ViewBuilder
@@ -130,9 +616,11 @@ struct ApplyFoundMatchesSheetView: View {
         }
     }
 
+    // MARK: - Footer
+
     private var footer: some View {
         HStack {
-            Text("\(targets.count) file(s) with a found match")
+            Text("\(selection.count) of \(targets.count) selected")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if let applySummary {
@@ -140,19 +628,36 @@ struct ApplyFoundMatchesSheetView: View {
             }
             Spacer()
             if isApplying { ProgressView().controlSize(.small) }
-            Button("Apply All Found Matches") { Task { await applyAll() } }
+            Button("Apply Selected Matches") { Task { await applySelected() } }
                 .buttonStyle(.borderedProminent)
-                .disabled(targets.isEmpty || isApplying)
+                .disabled(selection.isEmpty || isApplying)
         }
         .padding()
     }
 
-    private func applyAll() async {
+    // MARK: - Selection lifecycle
+
+    /// Keeps `selection` matching "all selected by default" as `targets`
+    /// changes underneath it — called on appear, whenever a correction
+    /// sheet closes, and whenever the background batch lookup completes
+    /// another file while this window is open. A file new since the last
+    /// sync starts selected; a file the user already explicitly
+    /// deselected stays that way; a file that's gone (applied, or
+    /// resolved by a correction) is simply dropped.
+    private func syncSelection() {
+        let currentURLs = Set(targets.map(\.url))
+        let newURLs = currentURLs.subtracting(knownTargetURLs)
+        selection.formIntersection(currentURLs)
+        selection.formUnion(newURLs)
+        knownTargetURLs = currentURLs
+    }
+
+    private func applySelected() async {
         isApplying = true
         defer { isApplying = false }
         outcomesByURL = [:]
 
-        let files = targets
+        let files = selectedTargets
         var appliedCount = 0
         var appliedWithoutBackupCount = 0
         var alreadyCompleteCount = 0
@@ -187,6 +692,8 @@ struct ApplyFoundMatchesSheetView: View {
         applySummary = Self.summaryText(
             applied: appliedCount, appliedWithoutBackup: appliedWithoutBackupCount,
             alreadyComplete: alreadyCompleteCount, failed: failedCount, total: files.count)
+
+        syncSelection()
     }
 
     /// "Applied to X of Y file(s)" plus whichever of

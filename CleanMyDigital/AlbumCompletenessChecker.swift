@@ -29,11 +29,21 @@ enum AlbumCompletenessOnlineResult: Sendable, Equatable {
     case missingTracks([String])
 }
 
-/// One album folder's files, grouped for a completeness check — files
-/// under `ArtistName/AlbumName/` share a folder, so the folder itself is
-/// the natural grouping key for "is this album whole?"
+/// One album (or compilation) folder's files, grouped for a completeness
+/// check — files under `ArtistName/AlbumName/` (or a compilation's own
+/// folder) share a folder, so the folder itself is the natural grouping
+/// key for "is this release whole?"
 struct AlbumGroup: Identifiable, Sendable {
     let folderURL: URL
+    /// Every file in a group shares one category — a single scan is always
+    /// one category throughout (see `LibraryScanner.scan`) — so this is
+    /// read once from the group's own files rather than tracked
+    /// separately. `DiscogsAlbumQuery` and `AlbumMetadataLookupView` read
+    /// this to tell a compilation apart from an album — Discogs credits a
+    /// compilation release to "Various", never to `artist` below (see
+    /// `DiscogsQuery`'s doc comment for the same rule at the per-track
+    /// level).
+    let category: LibraryCategory
     let artist: String?
     let albumTitle: String?
     /// First non-empty Year tag among the group's files — same
@@ -49,6 +59,24 @@ struct AlbumGroup: Identifiable, Sendable {
     /// that had a parseable position.
     let presentPositions: Set<Int>
 
+    /// `category` defaults to `.albums` — the only case that existed
+    /// before Compilations joined `AlbumCompletenessChecker.groups(for:)`
+    /// — so call sites/tests built before that widening keep compiling
+    /// unchanged.
+    init(
+        folderURL: URL, category: LibraryCategory = .albums, artist: String?, albumTitle: String?,
+        year: String?, files: [AudioFile], expectedTotalFromTags: Int?, presentPositions: Set<Int>
+    ) {
+        self.folderURL = folderURL
+        self.category = category
+        self.artist = artist
+        self.albumTitle = albumTitle
+        self.year = year
+        self.files = files
+        self.expectedTotalFromTags = expectedTotalFromTags
+        self.presentPositions = presentPositions
+    }
+
     var id: URL { folderURL }
 
     var localStatus: AlbumCompletenessStatus {
@@ -62,15 +90,26 @@ struct AlbumGroup: Identifiable, Sendable {
     }
 }
 
-/// Groups scanned Albums-category files by their containing folder and
-/// checks each group's track-number tags for a stated total, so an
-/// obviously-incomplete album (fewer files than its own tags claim) is
-/// flagged without ever hitting the network. Pure and filesystem-free,
-/// like `CollectionPlanner`/`DuplicatePlanner`.
+/// Groups scanned Albums- and Compilations-category files by their
+/// containing folder and checks each group's track-number tags for a
+/// stated total, so an obviously-incomplete release (fewer files than its
+/// own tags claim) is flagged without ever hitting the network. Pure and
+/// filesystem-free, like `CollectionPlanner`/`DuplicatePlanner`.
+///
+/// Compilations were added here so `ApplyFoundMatchesSheetView`'s
+/// section-level "re-match this whole folder" control can reach them too —
+/// a compilation is exactly as much "one release with a tracklist" as an
+/// album is, just credited to "Various" rather than one artist (see
+/// `AlbumGroup.category`/`DiscogsAlbumQuery`). `AlbumCompletenessSheetView`,
+/// this function's other caller, is unaffected: its "Check Album
+/// Completeness…" window is only ever opened while the category picker is
+/// on Albums (see `ContentView`'s toolbar), and a scan is always one
+/// category throughout, so `scanner.files` there never actually contains
+/// Compilations files for this widened filter to newly match.
 enum AlbumCompletenessChecker {
     static func groups(for files: [AudioFile]) -> [AlbumGroup] {
         var buckets: [URL: [AudioFile]] = [:]
-        for file in files where file.category == .albums {
+        for file in files where file.category == .albums || file.category == .compilations {
             let folderURL = file.url.deletingLastPathComponent().standardizedFileURL
             buckets[folderURL, default: []].append(file)
         }
@@ -94,6 +133,7 @@ enum AlbumCompletenessChecker {
 
             return AlbumGroup(
                 folderURL: folderURL,
+                category: groupFiles[0].category,
                 artist: groupFiles.first(where: { $0.expectedArtist?.isEmpty == false })?.expectedArtist,
                 albumTitle: groupFiles.first(where: { $0.album?.isEmpty == false })?.album,
                 year: groupFiles.first(where: { $0.year?.isEmpty == false })?.year,

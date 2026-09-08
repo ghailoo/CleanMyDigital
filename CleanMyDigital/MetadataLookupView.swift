@@ -132,6 +132,11 @@ private struct DiscogsTabView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var results: [DiscogsRelease] = []
+    /// True when `results` came from `DiscogsClient.searchCompilation`'s
+    /// retry without the track term — that confirms the release, not this
+    /// specific track, so `resultsList` says so rather than let a pick
+    /// here read as a confirmed exact-track hit.
+    @State private var usedBroaderTrackFallback = false
     @State private var selectedRelease: DiscogsRelease?
     @State private var artistText = ""
     @State private var trackText = ""
@@ -166,6 +171,17 @@ private struct DiscogsTabView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                // The Artist search field above reads "Various" for a
+                // compilation (see `DiscogsQuery`'s doc comment) — the
+                // track's own real artist would otherwise be invisible
+                // in this sheet, even though it's exactly what tells a
+                // user whether the right track is being searched for.
+                if file.category == .compilations, let trackArtist = file.artist, !trackArtist.isEmpty {
+                    Text("Track artist (tag): \(trackArtist)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             if selectedRelease != nil {
@@ -236,15 +252,25 @@ private struct DiscogsTabView: View {
             ContentUnavailableView.search
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(results) { release in
-                Button {
-                    selectedRelease = release
-                } label: {
-                    DiscogsResultRow(release: release)
+            VStack(spacing: 0) {
+                if usedBroaderTrackFallback {
+                    Label("No exact track match — these releases matched on artist/album only.",
+                          systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal)
+                        .padding(.top, 6)
                 }
-                .buttonStyle(.plain)
+                List(results) { release in
+                    Button {
+                        selectedRelease = release
+                    } label: {
+                        DiscogsResultRow(release: release)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
     }
 
@@ -253,15 +279,23 @@ private struct DiscogsTabView: View {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
+        let artist = artistText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let track = trackText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let album = albumText.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            results = try await DiscogsClient.search(
-                artist: artistText.trimmingCharacters(in: .whitespacesAndNewlines),
-                track: trackText.trimmingCharacters(in: .whitespacesAndNewlines),
-                album: albumText.trimmingCharacters(in: .whitespacesAndNewlines),
-                token: discogsToken)
+            if file.category == .compilations {
+                let outcome = try await DiscogsClient.searchCompilation(
+                    artist: artist, track: track, album: album, token: discogsToken)
+                results = outcome.releases
+                usedBroaderTrackFallback = outcome.usedBroaderTrackFallback
+            } else {
+                results = try await DiscogsClient.search(artist: artist, track: track, album: album, token: discogsToken)
+                usedBroaderTrackFallback = false
+            }
         } catch {
             errorMessage = error.localizedDescription
             results = []
+            usedBroaderTrackFallback = false
         }
     }
 }
@@ -468,22 +502,10 @@ private struct ComparisonView: View {
     }
 
     private func comparisonRow(field: MetadataField, current: String?, discogs: String?, note: String? = nil) -> some View {
-        HStack(alignment: .top) {
-            Text(field.rawValue)
-                .font(.subheadline.weight(.medium))
-                .frame(width: 100, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(current?.isEmpty == false ? current! : "–")
-                    .foregroundStyle(.secondary)
-                Text("Current").font(.caption2).foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(discogs ?? note ?? "–")
-                    .foregroundStyle(discogs == nil ? .tertiary : .primary)
-                Text("Discogs").font(.caption2).foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        MetadataComparisonRow(
+            fieldLabel: field.rawValue, currentValue: current, matchColumnLabel: "Discogs",
+            matchValue: discogs, matchPlaceholder: note
+        ) {
             if fillable.contains(field) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
@@ -492,8 +514,6 @@ private struct ComparisonView: View {
                 Color.clear.frame(width: 16, height: 16)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
     }
 
     private var artworkComparisonRow: some View {
@@ -858,22 +878,10 @@ private struct MusicBrainzComparisonView: View {
     }
 
     private func comparisonRow(field: MetadataField, current: String?, found: String?, note: String? = nil) -> some View {
-        HStack(alignment: .top) {
-            Text(field.rawValue)
-                .font(.subheadline.weight(.medium))
-                .frame(width: 100, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(current?.isEmpty == false ? current! : "–")
-                    .foregroundStyle(.secondary)
-                Text("Current").font(.caption2).foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(found ?? note ?? "–")
-                    .foregroundStyle(found == nil ? .tertiary : .primary)
-                Text("MusicBrainz").font(.caption2).foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        MetadataComparisonRow(
+            fieldLabel: field.rawValue, currentValue: current, matchColumnLabel: "MusicBrainz",
+            matchValue: found, matchPlaceholder: note
+        ) {
             if fillable.contains(field) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
@@ -882,8 +890,6 @@ private struct MusicBrainzComparisonView: View {
                 Color.clear.frame(width: 16, height: 16)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
     }
 
     private var artworkComparisonRow: some View {
