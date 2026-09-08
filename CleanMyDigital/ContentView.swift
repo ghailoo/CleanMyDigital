@@ -365,6 +365,7 @@ struct ContentView: View {
                 .aspectRatio(contentMode: .fill)
                 .frame(width: 24, height: 24)
                 .clipShape(RoundedRectangle(cornerRadius: 3))
+                .accessibilityLabel("Has artwork")
         } else {
             RoundedRectangle(cornerRadius: 3)
                 .fill(Color.gray.opacity(0.2))
@@ -374,6 +375,10 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                // The placeholder means "no artwork", which is a real
+                // finding rather than decoration — so it's labelled
+                // rather than hidden from assistive technology.
+                .accessibilityLabel("No artwork")
         }
     }
 
@@ -388,6 +393,9 @@ struct ContentView: View {
                 .padding(.vertical, 2)
                 .background(Color.green.opacity(0.15), in: Capsule())
                 .help("Found via \(provider.rawValue)")
+                // Which provider matched is only in the tooltip, so it's
+                // folded into the spoken label rather than lost.
+                .accessibilityLabel("Match found via \(provider.rawValue)")
         case .noMatch:
             Text("No match")
                 .font(.caption2)
@@ -415,14 +423,22 @@ struct ContentView: View {
                          tooltip: isLow
                             ? "Frequencies above ~\(Int(hz / 1000))kHz are missing — likely re-encoded from a lower-bitrate source"
                             : "Full-range audio up to ~\(Int(hz / 1000))kHz")
+                // Suspicious vs. full-range is carried by colour alone in
+                // the badge; the label states it outright.
+                .accessibilityLabel(
+                    String(format: "Cutoff %.1f kilohertz, %@", hz / 1000,
+                           isLow ? "likely transcoded" : "full range"))
         case .inconclusive:
             Text("–").foregroundStyle(.tertiary).help("Too short or quiet to measure")
+                .accessibilityLabel("Cutoff not measurable — too short or quiet")
         case .failed(let message):
             Image(systemName: "questionmark.circle")
                 .foregroundStyle(.secondary)
                 .help(message)
+                .accessibilityLabel("Cutoff measurement failed: \(message)")
         case nil:
             Text("–").foregroundStyle(.tertiary)
+                .accessibilityLabel("Cutoff not measured")
         }
     }
 
@@ -454,6 +470,7 @@ struct ContentView: View {
                     .help(file.isReadable
                           ? file.issues.map(\.label).joined(separator: ", ")
                           : "Could not read this file")
+                    .accessibilityLabel("Status: \(statusLabel(for: file))")
             }
             .width(24)
 
@@ -523,6 +540,19 @@ struct ContentView: View {
         if file.hasNoMetadata { return "xmark.circle.fill" }
         if file.hasIssues { return "exclamationmark.circle.fill" }
         return "checkmark.circle.fill"
+    }
+
+    /// Spoken equivalent of `statusSymbol` + `statusColor`. That column
+    /// has an empty header and its cell is a bare SF Symbol, so without
+    /// this VoiceOver announces an unlabelled image in an unnamed column
+    /// — and the status is otherwise carried by shape and colour alone.
+    private func statusLabel(for file: AudioFile) -> String {
+        if !file.isReadable { return "Unreadable" }
+        if file.hasNoMetadata { return "No metadata at all" }
+        if file.hasIssues {
+            return "Missing \(file.issues.map(\.label).joined(separator: ", "))"
+        }
+        return "Complete"
     }
 
     private func statusColor(for file: AudioFile) -> Color {
@@ -595,7 +625,7 @@ struct ContentView: View {
                 copyReport()
             }
             .disabled(scanner.files.isEmpty)
-            .help("Copy the list of files with missing metadata to the clipboard")
+            .help(needsScanHelp("Copy the list of files with missing metadata to the clipboard"))
         }
         ToolbarItem {
             Button("Export CSV…", systemImage: "square.and.arrow.up") {
@@ -603,7 +633,7 @@ struct ContentView: View {
                 showCSVExporter = true
             }
             .disabled(scanner.files.isEmpty)
-            .help("Export every scanned file's metadata as a CSV file")
+            .help(needsScanHelp("Export every scanned file's metadata as a CSV file"))
         }
         ToolbarItem {
             Button(scanner.isLookingUp ? "Stop" : "Find All Metadata",
@@ -615,23 +645,21 @@ struct ContentView: View {
                 }
             }
             .disabled(!scanner.isLookingUp && !canFindAllMetadata)
-            .help(scanner.isLookingUp
-                  ? "Stop the batch lookup — matches found so far are kept"
-                  : "Search Discogs and MusicBrainz for every flagged file's missing metadata")
+            .help(findAllMetadataHelp)
         }
         ToolbarItem {
             Button("Apply Found Matches…", systemImage: "checkmark.circle") {
                 openWindow(id: "apply-found-matches")
             }
             .disabled(!canApplyFoundMatches)
-            .help("Apply every batch lookup's found match — Artist/Album/Year/Genre/Artwork only")
+            .help(applyFoundMatchesHelp)
         }
         ToolbarItem {
             Button("Rename Files…", systemImage: "textformat") {
                 openWindow(id: "rename-files")
             }
             .disabled(scanner.files.isEmpty)
-            .help("Rename files to \"Artist - Title\" using their tags")
+            .help(needsScanHelp("Rename files to \"Artist - Title\" using their tags"))
         }
         if selectedCategory == .singles {
             ToolbarItem {
@@ -639,7 +667,7 @@ struct ContentView: View {
                     openWindow(id: "collect-into-folders")
                 }
                 .disabled(scanner.files.isEmpty)
-                .help("Group each Singles track's mixes into a subfolder named after the release")
+                .help(needsScanHelp("Group each Singles track's mixes into a subfolder named after the release"))
             }
         }
         Group {
@@ -648,7 +676,7 @@ struct ContentView: View {
                     openWindow(id: "find-duplicates")
                 }
                 .disabled(scanner.files.isEmpty)
-                .help("Find files sharing the same Artist and Title, and move the lower-quality copy aside")
+                .help(needsScanHelp("Find files sharing the same Artist and Title, and move the lower-quality copy aside"))
             }
             if selectedCategory == .albums {
                 ToolbarItem {
@@ -656,7 +684,7 @@ struct ContentView: View {
                         openWindow(id: "check-album-completeness")
                     }
                     .disabled(scanner.files.isEmpty)
-                    .help("Check whether each scanned album folder has its full tracklist")
+                    .help(needsScanHelp("Check whether each scanned album folder has its full tracklist"))
                 }
             }
             ToolbarItem {
@@ -671,17 +699,25 @@ struct ContentView: View {
                 .disabled(!scanner.isAnalyzingSpectrum && scanner.files.isEmpty)
                 .help(scanner.isAnalyzingSpectrum
                       ? "Stop the spectral analysis — cutoffs measured so far are kept"
-                      : "Measure each file's real frequency cutoff to flag likely transcoded/fake-quality files")
+                      : needsScanHelp("Measure each file's real frequency cutoff to flag likely transcoded/fake-quality files"))
             }
-            ToolbarItem {
-                Button("Treat This Folder as the Artist", systemImage: "person.crop.square") {
-                    if let folder = scanner.scannedFolder {
-                        treatScannedFolderAsArtist(folder)
+            // Albums-only, because the override it sets is Albums-only:
+            // `expectedArtist(for:in:override:category:)` ignores it for
+            // every other category. Shown in all three, it rescanned the
+            // folder and changed nothing — the worst kind of failure,
+            // since the app looked like it had obeyed. This matches the
+            // "Expected Artist" column, which is already Albums-only.
+            if selectedCategory == .albums {
+                ToolbarItem {
+                    Button("Treat This Folder as the Artist", systemImage: "person.crop.square") {
+                        if let folder = scanner.scannedFolder {
+                            treatScannedFolderAsArtist(folder)
+                        }
                     }
+                    .disabled(scanner.scannedFolder == nil
+                              || scanner.state == .scanning || scanner.state == .enumerating)
+                    .help(treatAsArtistHelp)
                 }
-                .disabled(scanner.scannedFolder == nil
-                          || scanner.state == .scanning || scanner.state == .enumerating)
-                .help("Rescan the current folder using its own name as the artist — for scanning a single artist's folder directly instead of a parent folder containing many artists. Always available: unlike the mis-rooted-scan banner, this doesn't depend on the folder name looking like an album.")
             }
         }
     }
@@ -689,11 +725,65 @@ struct ContentView: View {
     private var canFindAllMetadata: Bool {
         scanner.state == .finished
             && scanner.files.contains(where: \.hasIssues)
-            && (!discogsToken.isEmpty || !musicBrainzContact.isEmpty)
+            && hasAnyProviderCredential
     }
 
     private var canApplyFoundMatches: Bool {
         scanner.lookupResults.values.contains { $0.isFound }
+    }
+
+    /// Discogs needs a token and MusicBrainz needs a contact email; with
+    /// neither, every lookup path is dead. See `findAllMetadataHelp` for
+    /// why this is called out separately from the other preconditions.
+    private var hasAnyProviderCredential: Bool {
+        !discogsToken.isEmpty || !musicBrainzContact.isEmpty
+    }
+
+    // MARK: - Help text
+    //
+    // A disabled control that doesn't say *why* it's disabled is a dead
+    // end — especially for the app's primary action, where a tester with
+    // no Discogs token saw a greyed-out button and a tooltip describing
+    // what it would have done. These name the blocker that's actually in
+    // effect, and only fall back to describing the action once it's
+    // genuinely available.
+
+    private var findAllMetadataHelp: String {
+        if scanner.isLookingUp {
+            return "Stop the batch lookup — matches found so far are kept"
+        }
+        if !hasAnyProviderCredential {
+            return "Add a Discogs token or a MusicBrainz contact email in Settings to search for missing metadata"
+        }
+        if scanner.state != .finished {
+            return "Scan a folder first, then search for the missing metadata it finds"
+        }
+        if !scanner.files.contains(where: \.hasIssues) {
+            return "Nothing to look up — no scanned file is missing metadata"
+        }
+        return "Search Discogs and MusicBrainz for every flagged file's missing metadata"
+    }
+
+    private var applyFoundMatchesHelp: String {
+        guard canApplyFoundMatches else {
+            return "Run \"Find All Metadata\" first — this applies what that search found"
+        }
+        return "Review each file's found match, then write the Artist/Album/Year/Genre/Artwork fields it fills"
+    }
+
+    private var treatAsArtistHelp: String {
+        guard scanner.hasScannedFolder else {
+            return "Scan a folder first — this rescans it using its own name as the artist"
+        }
+        guard scanner.scannedFolder != nil else {
+            return "Only available when one folder was scanned — this treats that folder's name as the artist"
+        }
+        return "Rescan the current folder using its own name as the artist — for scanning a single artist's folder directly instead of a parent folder containing many artists"
+    }
+
+    /// Used by every toolbar action that simply needs a completed scan.
+    private func needsScanHelp(_ whenAvailable: String) -> String {
+        scanner.files.isEmpty ? "Scan a folder first" : whenAvailable
     }
 
     private func copyReport() {
