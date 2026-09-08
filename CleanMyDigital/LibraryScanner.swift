@@ -99,8 +99,10 @@ final class LibraryScanner {
     /// "Check on Discogs" and running Apply again for that one album
     /// overwrites its stored result, since `recordAlbumCompletenessResult`
     /// already runs unconditionally at the end of `applyToAlbum()`, even
-    /// when nothing new needed writing. Only cleared by quitting the app —
-    /// consistent with nothing else here persisting across launches either.
+    /// when nothing new needed writing. Not cleared by `scan()` for that
+    /// reason — but `reset()` *does* clear it, since that's used for a
+    /// wholesale category change (a completely different scan context, not
+    /// a rescan of the same folder) rather than quitting the app.
     private(set) var albumCompletenessResults: [URL: AlbumCompletenessOnlineResult] = [:]
 
     /// The most recent batch of file moves, oldest first — renames,
@@ -270,6 +272,49 @@ final class LibraryScanner {
             $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending
         }
         state = .finished
+    }
+
+    /// Returns the scanner to a genuinely fresh, pre-scan state — used
+    /// when the category picker changes, so a stale scan (read under the
+    /// *old* category's rules — different missing-field checks, different
+    /// artist-folder handling) can't keep showing on screen mislabeled as
+    /// if it matched the newly chosen one.
+    ///
+    /// Clears everything `scan(folder:category:artistOverride:)`'s own
+    /// opening lines clear, plus `albumCompletenessResults` — which
+    /// normally survives a rescan of the *same* folder (see its own doc
+    /// comment) but has no reason to survive a category change, since
+    /// that's a wholesale switch to a different scan context, not a
+    /// rescan. In-flight lookup/spectral work is cancelled outright rather
+    /// than left to finish, since it would just be racing to write results
+    /// against a scan that's being discarded.
+    func reset() {
+        state = .idle
+        files = []
+        scannedCount = 0
+        totalCount = 0
+        scannedFolder = nil
+        category = nil
+        artistOverride = nil
+        artistOverrideAutoDetected = false
+
+        lookupTask?.cancel()
+        lookupTask = nil
+        lookupResults = [:]
+        isLookingUp = false
+        lookupCompletedCount = 0
+        lookupTotalCount = 0
+
+        spectralTask?.cancel()
+        spectralTask = nil
+        spectralResults = [:]
+        isAnalyzingSpectrum = false
+        spectralCompletedCount = 0
+        spectralTotalCount = 0
+
+        albumCompletenessResults = [:]
+
+        lastRenameBatch = []
     }
 
     /// Writes `changes` to `file`'s tags, backing up the original first if
@@ -785,9 +830,29 @@ final class LibraryScanner {
             // broader "any of this artist's releases" result set risks
             // confidently applying the wrong release's data instead of just
             // finding nothing. See DiscogsClient.search's doc comment.
-            if let releases = try? await DiscogsClient.search(
-                artist: query.artist, track: query.track, token: discogsToken, allowArtistOnlyFallback: false),
-               let top = releases.first {
+            //
+            // `album` has to be passed through here — for `.compilations`,
+            // `query.artist` is just "Various" (see `DiscogsQuery`'s doc
+            // comment), so `album`/`release_title` is doing most of the
+            // narrowing there alongside the track term.
+            //
+            // Compilations go through `searchCompilation` instead of
+            // `search` directly — it retries once without the track term
+            // on zero results (narrower, and therefore still safe for this
+            // no-human-review path, unlike the general artist-only
+            // fallback `allowArtistOnlyFallback: false` is guarding
+            // against below) — see its own doc comment.
+            let releases: [DiscogsRelease]?
+            if file.category == .compilations {
+                releases = try? await DiscogsClient.searchCompilation(
+                    artist: query.artist, track: query.track, album: query.album, token: discogsToken
+                ).releases
+            } else {
+                releases = try? await DiscogsClient.search(
+                    artist: query.artist, track: query.track, album: query.album,
+                    token: discogsToken, allowArtistOnlyFallback: false)
+            }
+            if let releases, let top = releases.first {
                 let fillable = top.fillableFields(missing: missing)
                 if !fillable.isEmpty {
                     return .found(provider: .discogs, candidate: .discogs(top), fillableFields: fillable)

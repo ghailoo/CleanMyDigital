@@ -105,6 +105,20 @@ struct ContentView: View {
         .sheet(isPresented: $showCategoryPrompt) {
             categoryPromptSheet
         }
+        .onChange(of: selectedCategory) {
+            // Guarded to the scanner actually having something to clear —
+            // `categoryPromptSheet` also assigns `selectedCategory` (at
+            // launch, before any scan), and without this guard the two
+            // categories wouldn't behave consistently there: the default
+            // is already `.albums`, so picking Albums at launch wouldn't
+            // fire this change at all while picking Singles would. At
+            // launch the scanner is idle and the empty state already
+            // shows a prominent "Choose Folder…" button, so there's
+            // nothing to lose either way.
+            guard scanner.state != .idle else { return }
+            scanner.reset()
+            showFolderPicker = true
+        }
         .navigationTitle("CleanMyDigital")
         .navigationSubtitle(navigationSubtitleText)
     }
@@ -403,7 +417,7 @@ struct ContentView: View {
     private var metadataColumns: some TableColumnContent<AudioFile, KeyPathComparator<AudioFile>> {
         TableColumn("Title", value: \.title.orDash)
         TableColumn("Artist", value: \.artist.orDash)
-        if scanner.category != .singles {
+        if scanner.category == .albums {
             TableColumn("Expected Artist", value: \.expectedArtist.orDash)
         }
         TableColumn("Album", value: \.album.orDash)
