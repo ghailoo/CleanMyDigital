@@ -937,26 +937,31 @@ final class LibraryScanner {
             // confidently applying the wrong release's data instead of just
             // finding nothing. See DiscogsClient.search's doc comment.
             //
-            // `album` has to be passed through here — for `.compilations`,
+            // `album` has to be passed through for `.compilations` — there,
             // `query.artist` is just "Various" (see `DiscogsQuery`'s doc
             // comment), so `album`/`release_title` is doing most of the
-            // narrowing there alongside the track term.
+            // narrowing alongside the track term.
             //
             // Compilations go through `searchCompilation` instead of
-            // `search` directly — it retries once without the track term
-            // on zero results (narrower, and therefore still safe for this
+            // `searchTrack` — it retries once without the track term on
+            // zero results (narrower, and therefore still safe for this
             // no-human-review path, unlike the general artist-only
             // fallback `allowArtistOnlyFallback: false` is guarding
             // against below) — see its own doc comment.
+            //
+            // Everything else goes through `searchTrack`, which sends a
+            // free-text `q=` combining artist+track rather than Discogs'
+            // much patchier `track=` param — see its doc comment.
             let releases: [DiscogsRelease]?
             if file.category == .compilations {
                 releases = try? await DiscogsClient.searchCompilation(
                     artist: query.artist, track: query.track, album: query.album, token: discogsToken
                 ).releases
             } else {
-                releases = try? await DiscogsClient.search(
-                    artist: query.artist, track: query.track, album: query.album,
-                    token: discogsToken, allowArtistOnlyFallback: false)
+                releases = try? await DiscogsClient.searchTrack(
+                    artist: query.artist, track: query.track,
+                    token: discogsToken, allowArtistOnlyFallback: false
+                ).releases
             }
             if let releases, let top = releases.first {
                 let fillable = top.fillableFields(missing: missing)

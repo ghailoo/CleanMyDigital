@@ -165,6 +165,60 @@ struct DiscogsClientSearchTests {
         #expect(query.track == "Changes") // "Artist - " prefix still stripped, unlike Compilations
     }
 
+    /// The fix, at the `DiscogsQuery` level: a Singles file's containing
+    /// folder is a release identifier ("1991 - 3 A.M. Eternal (CDM)"), not
+    /// an artist — `query.artist` must come from the Artist tag, never
+    /// `expectedArtist`, unlike Albums (see `albumsStillDeriveArtistAndTrackNormally`
+    /// above, where `expectedArtist` IS preferred). The mix name also
+    /// survives in `track` — see `MetadataQueryCleanedTrackTitleTests`.
+    @Test func singlesUseTheArtistTagNotTheExpectedArtistFolderName() {
+        let file = Self.makeFile(
+            category: .singles,
+            fileName: "1. The KLF - 3 A.M. Eternal (Live At The S.S.L.).flac",
+            artist: "The KLF",
+            expectedArtist: "1991 - 3 A.M. Eternal (CDM)",
+            album: nil)
+
+        let query = DiscogsQuery(for: file)
+        #expect(query.artist == "The KLF")
+        #expect(query.track == "3 A.M. Eternal (Live At The S.S.L.)")
+    }
+
+    // MARK: - combinedQuery (searchTrack's free-text term builder)
+
+    @Test func combinedQueryJoinsArtistAndTrackWithADash() {
+        #expect(DiscogsClient.combinedQuery(artist: "The KLF", track: "3 A.M. Eternal (Live At The S.S.L.)")
+                == "The KLF - 3 A.M. Eternal (Live At The S.S.L.)")
+    }
+
+    @Test func combinedQueryIsJustTheTrackWhenArtistIsEmpty() {
+        #expect(DiscogsClient.combinedQuery(artist: "", track: "3 A.M. Eternal") == "3 A.M. Eternal")
+    }
+
+    @Test func combinedQueryIsJustTheArtistWhenTrackIsEmpty() {
+        #expect(DiscogsClient.combinedQuery(artist: "The KLF", track: "") == "The KLF")
+    }
+
+    @Test func combinedQueryIsEmptyWhenBothAreEmpty() {
+        #expect(DiscogsClient.combinedQuery(artist: "", track: "") == "")
+    }
+
+    // MARK: - searchTrack (offline-testable edge cases — the tiered network
+    // retries themselves are verified against the live API; see its doc comment)
+
+    @Test func searchTrackThrowsMissingTokenWhenTokenIsEmpty() async {
+        await #expect(throws: DiscogsError.self) {
+            _ = try await DiscogsClient.searchTrack(artist: "The KLF", track: "3 A.M. Eternal", token: "")
+        }
+    }
+
+    @Test func searchTrackReturnsEmptyImmediatelyWithNoArtistOrTrack() async throws {
+        // Nothing to search for — no network call should even be attempted.
+        let result = try await DiscogsClient.searchTrack(artist: "", track: "", token: "fake-token")
+        #expect(result.releases.isEmpty)
+        #expect(!result.usedBroaderTitleOnlyFallback)
+    }
+
     // MARK: - searchURL for the compilation shape
 
     @Test func searchURLForTheCompilationShapeSendsArtistAndReleaseTitleButNoTrack() throws {

@@ -387,6 +387,85 @@ enum DiscogsClient {
         return CompilationSearchResult(releases: broaderReleases, usedBroaderTrackFallback: !broaderReleases.isEmpty)
     }
 
+    /// The result of a per-file (non-compilation) `searchTrack` search — the
+    /// same releases it would return, plus whether they came from its
+    /// broader title-only retry tier. A result found that way used no
+    /// artist term at all, so a caller showing these to a human should say
+    /// so rather than let it read as a confirmed artist+title match.
+    struct TrackSearchResult: Sendable {
+        let releases: [DiscogsRelease]
+        let usedBroaderTitleOnlyFallback: Bool
+    }
+
+    /// Searches for a single track using Discogs' free-text `q=` search
+    /// rather than its structured `artist=`/`track=` params. Verified
+    /// against the live API on a real case ("The KLF" /
+    /// "3 A.M. Eternal (Live At The S.S.L.)"): every structured
+    /// `artist=`+`track=` combination tried — full title, mix stripped,
+    /// even the exact correct artist and title — returned either zero
+    /// results or the wrong release, while `q=` with "Artist - Title"
+    /// combined found the exact pressing on the first try. Discogs' `track=`
+    /// param searches its per-track index, which is evidently far more
+    /// patchy than its general free-text index. This is specific to
+    /// `track=`, not to structured params generally — `searchCompilation`'s
+    /// `artist=`+`release_title=` shape is unrelated and unaffected; see its
+    /// doc comment.
+    ///
+    /// Deliberately does NOT strip a mix/version parenthetical from `track`
+    /// before combining it into `q` — the same verification found that
+    /// doing so turns an exact match into wrong, generic-pressing results.
+    /// See `MetadataQuery.cleanedTrackTitle`'s doc comment.
+    ///
+    /// Deliberately does NOT send `album` as `release_title` alongside `q`
+    /// either, even when the caller has one. `searchURL`'s own free-text
+    /// branch already drops `album` unconditionally whenever `artist` is
+    /// empty, which is effectively what this function does by routing
+    /// through it with `artist: ""` — see
+    /// `fallsBackToQParamWhenArtistIsEmptyRegardlessOfAlbum`. That's the
+    /// right call here too: for Singles specifically, the derived album
+    /// term is often just the containing folder name, which for Singles
+    /// carries no reliable meaning at all (files may sit loose in any
+    /// folder) — sending it as an additional filter would risk silently
+    /// reintroducing exactly the "nonsense structured term shadows a
+    /// findable release" failure this function exists to fix.
+    ///
+    /// If the primary combined search returns zero results, retries once
+    /// with just `track` (mix included) — dropping the artist rather than
+    /// any part of the title, since the title is the strongest identifying
+    /// signal here, not a redundant artist prefix. Skipped when
+    /// `allowArtistOnlyFallback` is false: the automated, no-human-review
+    /// batch lookup (`LibraryScanner.lookupOutcome`) shouldn't trade "found
+    /// nothing" for "confidently applied a same-titled but wrong track's
+    /// release" — same reasoning as `search`'s own gating.
+    static func searchTrack(
+        artist: String, track: String, token: String, allowArtistOnlyFallback: Bool = true
+    ) async throws -> TrackSearchResult {
+        guard !token.isEmpty else { throw DiscogsError.missingToken }
+
+        let combined = combinedQuery(artist: artist, track: track)
+        guard !combined.isEmpty else {
+            return TrackSearchResult(releases: [], usedBroaderTitleOnlyFallback: false)
+        }
+
+        let results = try await performSearch(artist: "", track: combined, album: "", token: token)
+        if !results.isEmpty {
+            return TrackSearchResult(releases: results, usedBroaderTitleOnlyFallback: false)
+        }
+
+        guard allowArtistOnlyFallback, !artist.isEmpty, !track.isEmpty else {
+            return TrackSearchResult(releases: [], usedBroaderTitleOnlyFallback: false)
+        }
+        let broaderResults = try await performSearch(artist: "", track: track, album: "", token: token)
+        return TrackSearchResult(releases: broaderResults, usedBroaderTitleOnlyFallback: !broaderResults.isEmpty)
+    }
+
+    /// Combines an artist and a track title into one free-text search term
+    /// — "Artist - Title", or just whichever of the two is non-empty.
+    /// Factored out so it's verifiable without hitting the network.
+    static func combinedQuery(artist: String, track: String) -> String {
+        [artist, track].filter { !$0.isEmpty }.joined(separator: " - ")
+    }
+
     /// Builds the `/database/search` query items for an artist+track(+album)
     /// lookup — factored out from `performSearch` so the request shape can
     /// be verified without hitting the network.

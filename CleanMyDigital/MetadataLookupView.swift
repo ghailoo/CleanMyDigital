@@ -137,6 +137,10 @@ private struct DiscogsTabView: View {
     /// specific track, so `resultsList` says so rather than let a pick
     /// here read as a confirmed exact-track hit.
     @State private var usedBroaderTrackFallback = false
+    /// True when `results` came from `DiscogsClient.searchTrack`'s broader
+    /// retry with no artist term at all — `resultsList` says so rather than
+    /// let a pick here read as a confirmed artist+title match.
+    @State private var usedTitleOnlyFallback = false
     @State private var selectedRelease: DiscogsRelease?
     @State private var artistText = ""
     @State private var trackText = ""
@@ -260,6 +264,13 @@ private struct DiscogsTabView: View {
                         .foregroundStyle(.orange)
                         .padding(.horizontal)
                         .padding(.top, 6)
+                } else if usedTitleOnlyFallback {
+                    Label("No match with the artist included — these releases matched on title only.",
+                          systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal)
+                        .padding(.top, 6)
                 }
                 List(results) { release in
                     Button {
@@ -288,14 +299,21 @@ private struct DiscogsTabView: View {
                     artist: artist, track: track, album: album, token: discogsToken)
                 results = outcome.releases
                 usedBroaderTrackFallback = outcome.usedBroaderTrackFallback
+                usedTitleOnlyFallback = false
             } else {
-                results = try await DiscogsClient.search(artist: artist, track: track, album: album, token: discogsToken)
+                // `album` isn't sent here — see `DiscogsClient.searchTrack`'s
+                // doc comment on why a per-file search sends free-text `q=`
+                // (artist+track combined) with no `release_title` alongside it.
+                let outcome = try await DiscogsClient.searchTrack(artist: artist, track: track, token: discogsToken)
+                results = outcome.releases
+                usedTitleOnlyFallback = outcome.usedBroaderTitleOnlyFallback
                 usedBroaderTrackFallback = false
             }
         } catch {
             errorMessage = error.localizedDescription
             results = []
             usedBroaderTrackFallback = false
+            usedTitleOnlyFallback = false
         }
     }
 }

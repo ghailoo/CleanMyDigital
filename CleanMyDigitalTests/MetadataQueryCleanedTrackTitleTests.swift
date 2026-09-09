@@ -152,4 +152,39 @@ struct MetadataQueryCleanedTrackTitleTests {
             from: "(02) [Anouar Brahem] Track - Reprise.mp3", artist: "Anouar Brahem", category: .singles)
         #expect(cleaned == "Track - Reprise")
     }
+
+    // MARK: - Never strips a trailing mix/version parenthetical (the fix)
+
+    /// The real-world case that motivated this: "The KLF - 3 A.M. Eternal
+    /// (Live At The S.S.L.)" found the exact pressing on Discogs with the
+    /// mix name kept; stripping it down to "3 A.M. Eternal" found only
+    /// generic, wrong pressings. For a maxi single, the mix/version name is
+    /// often the single most identifying part of the title, not noise —
+    /// `cleanedTrackTitle` must never remove or truncate it.
+    @Test func neverStripsATrailingMixParentheticalFromASinglesFileName() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "1. The KLF - 3 A.M. Eternal (Live At The S.S.L.).flac", artist: "The KLF", category: .singles)
+        #expect(cleaned == "3 A.M. Eternal (Live At The S.S.L.)")
+    }
+
+    @Test func neverStripsATrailingMixParentheticalRegardlessOfCategory() {
+        for category: LibraryCategory in [.singles, .albums, .compilations] {
+            let cleaned = MetadataQuery.cleanedTrackTitle(
+                from: "Track Title (Euro Club Mix).mp3", artist: "Artist", category: category)
+            #expect(cleaned == "Track Title (Euro Club Mix)")
+        }
+    }
+
+    /// `strippingTrailingParenthetical` — the function that WOULD strip a
+    /// mix name — still exists and still works; this just confirms
+    /// `cleanedTrackTitle` never calls it, by checking its output would
+    /// have differed if it had.
+    @Test func strippingTrailingParentheticalRemainsAvailableButUnusedByCleanedTrackTitle() {
+        let title = "3 A.M. Eternal (Live At The S.S.L.)"
+        #expect(MetadataQuery.strippingTrailingParenthetical(from: title) == "3 A.M. Eternal")
+
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "The KLF - \(title).flac", artist: "The KLF", category: .singles)
+        #expect(cleaned == title)
+    }
 }

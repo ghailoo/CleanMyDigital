@@ -9,10 +9,22 @@ import Foundation
 /// MusicBrainz) so every provider builds its query from the same cleaned
 /// filename instead of each re-implementing its own heuristics.
 enum MetadataQuery {
-    /// For Singles and Albums, `expectedArtist` (the containing folder's
-    /// name) is preferred over the file's own Artist tag — those
-    /// categories are genuinely organized by artist, so the folder is
-    /// often the more reliable source when the tag is missing or wrong.
+    /// For Albums, `expectedArtist` (the containing folder's name) is
+    /// preferred over the file's own Artist tag — Albums are genuinely
+    /// organized by artist folder, so the folder is often the more
+    /// reliable source even when the tag is present but wrong.
+    ///
+    /// Singles do NOT get this treatment, unlike an earlier version of this
+    /// function. Per the README, Singles files may sit loose in any
+    /// folder, so the containing folder carries no reliable artist signal
+    /// there at all — verified against the live Discogs API with a real
+    /// Singles file whose folder was itself a release identifier ("1991 -
+    /// 3 A.M. Eternal (CDM)"), not an artist: using that as the artist term
+    /// found nothing, for every query shape tried. It also meant the real
+    /// artist ("The KLF") never fuzzy-matched anything, so
+    /// `cleanedTrackTitle`'s own "Artist - " prefix strip couldn't fire
+    /// either — one wrong value was producing two wrong search terms.
+    ///
     /// Compilations are organized by *release*, not by artist — the
     /// folder is the compilation's own name (e.g. "DJ Hits 100% '97-1"),
     /// never the track's artist — so `expectedArtist` there is never even
@@ -20,13 +32,42 @@ enum MetadataQuery {
     /// Searching Discogs/MusicBrainz for a compilation folder name as if
     /// it were an artist was returning zero results for every track,
     /// always — this is the fix for that.
+    ///
+    /// Singles and Compilations both fall back the same way when the file
+    /// has no Artist tag either: parsing an artist out of an
+    /// "Artist - Title" filename (`artistParsedFromFileName`) — a
+    /// filename-derived guess beats sending no artist term at all when the
+    /// filename actually states one.
     static func artist(for file: AudioFile) -> String {
-        switch file.category {
-        case .singles, .albums:
-            return file.expectedArtist ?? file.artist ?? ""
-        case .compilations:
-            return file.artist ?? ""
+        if file.category == .albums {
+            return file.expectedArtist ?? file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
         }
+        return file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
+    }
+
+    /// Parses the artist out of an "Artist - Title" filename — the text
+    /// before the first " - ", once a leading track number is stripped —
+    /// for when a file has no Artist tag at all to fall back on. Nil when
+    /// the (track-number-stripped) filename has no " - " separator, i.e.
+    /// there's nothing to parse an artist out of.
+    static func artistParsedFromFileName(_ fileName: String) -> String? {
+        let name = strippingLeadingTrackNumber(from: (fileName as NSString).deletingPathExtension)
+        guard let dashRange = name.range(of: " - ") else { return nil }
+        let left = String(name[name.startIndex..<dashRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return left.isEmpty ? nil : left
+    }
+
+    /// Strips a leading track number ("01 - ", "3.", "07_", "12)", or the
+    /// same wrapped in parentheses — "(01) ") from a filename-derived
+    /// title. Factored out of `cleanedTrackTitle` so `artistParsedFromFileName`
+    /// starts from the same track-number-free text.
+    private static func strippingLeadingTrackNumber(from name: String) -> String {
+        var name = name
+        if let range = name.range(of: #"^\s*\(?\d{1,3}[\s._\-)]+"#, options: .regularExpression) {
+            name.removeSubrange(range)
+        }
+        return name
     }
 
     /// The search term for `release_title` (Discogs) / `release:`
@@ -64,11 +105,19 @@ enum MetadataQuery {
     /// against `artist`, same as before — unconditional stripping would be
     /// unsafe there, where a real track title occasionally does start with
     /// a bracketed group that isn't an artist name (e.g. "[Live] Track").
+    ///
+    /// Deliberately does NOT strip a trailing mix/version parenthetical —
+    /// e.g. "(Live At The S.S.L.)", "(Euro Club Mix)". Audited and verified
+    /// against the live Discogs API: doing so turns an exact-pressing match
+    /// into wrong, generic-pressing results ("The KLF - 3 A.M. Eternal
+    /// (Live At The S.S.L.)" finds that exact release; "The KLF - 3 A.M.
+    /// Eternal" with the mix stripped finds only generic "3 A.M. Eternal"
+    /// pressings). For a maxi single, the mix name is often the single most
+    /// identifying part of the title, not noise — see
+    /// `DiscogsClient.searchTrack`'s doc comment, which is what actually
+    /// sends this term.
     static func cleanedTrackTitle(from fileName: String, artist: String, category: LibraryCategory) -> String {
-        var name = (fileName as NSString).deletingPathExtension
-        if let range = name.range(of: #"^\s*\(?\d{1,3}[\s._\-)]+"#, options: .regularExpression) {
-            name.removeSubrange(range)
-        }
+        var name = strippingLeadingTrackNumber(from: (fileName as NSString).deletingPathExtension)
 
         // Unlike the Singles-only " - " split below, square brackets are an
         // unambiguous delimiter — a real track title essentially never
