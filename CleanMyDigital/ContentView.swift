@@ -38,6 +38,64 @@ struct ContentView: View {
         var id: String { rawValue }
     }
 
+    /// One entry in the merged summary/filter row (see `summaryBar`) — a
+    /// count paired with the `Filter` case selecting it produces, plus the
+    /// label and severity colour the old separate summary bar used. Pulled
+    /// out as a pure function of `files`/`lookupResults` (rather than a
+    /// computed property reading `scanner` directly) so the mapping from
+    /// filter to label/color/count can be unit tested without a live
+    /// `LibraryScanner`.
+    struct FilterStat: Identifiable {
+        let filter: Filter
+        let label: String
+        let color: Color
+        let count: Int
+        var id: Filter { filter }
+    }
+
+    static func filterStats(files: [AudioFile], lookupResults: [URL: LookupOutcome]) -> [FilterStat] {
+        [
+            FilterStat(filter: .all, label: "Total", color: .secondary,
+                       count: files.count),
+            FilterStat(filter: .issues, label: "With issues", color: .orange,
+                       count: files.count(where: \.hasIssues)),
+            FilterStat(filter: .noMetadata, label: "No metadata", color: .red,
+                       count: files.count(where: \.hasNoMetadata)),
+            FilterStat(filter: .complete, label: "Complete", color: .green,
+                       count: files.count { !$0.hasIssues }),
+            FilterStat(filter: .found, label: "Found", color: .blue,
+                       count: files.count { lookupResults[$0.url]?.isFound == true }),
+        ]
+    }
+
+    /// The predicate behind each `Filter` case — shared by `filteredFiles`
+    /// and (indirectly, via `filterStats`' counts) the merged summary/filter
+    /// row, so the two can never disagree about what a given filter means.
+    static func fileMatches(_ file: AudioFile, filter: Filter, lookupResults: [URL: LookupOutcome]) -> Bool {
+        switch filter {
+        case .all: return true
+        case .issues: return file.hasIssues
+        case .noMetadata: return file.hasNoMetadata
+        case .complete: return !file.hasIssues
+        case .found: return lookupResults[file.url]?.isFound == true
+        }
+    }
+
+    /// The Lookup and Cutoff table columns only ever hold data once "Find
+    /// All Metadata" / "Check for Transcodes" has actually run — before
+    /// that they're just reserved blank space (Lookup empty, Cutoff four
+    /// em-dashes) taking room from every other column. Pulled out as pure
+    /// functions of the scanner's result dictionaries so the
+    /// column-visibility rule is unit-testable independent of the `Table`
+    /// view itself.
+    static func showsLookupColumn(lookupResults: [URL: LookupOutcome]) -> Bool {
+        !lookupResults.isEmpty
+    }
+
+    static func showsCutoffColumn(spectralResults: [URL: SpectralCutoffOutcome]) -> Bool {
+        !spectralResults.isEmpty
+    }
+
     let scanner: LibraryScanner
 
     @Environment(\.openWindow) private var openWindow
@@ -57,13 +115,7 @@ struct ContentView: View {
 
     private var filteredFiles: [AudioFile] {
         var result = scanner.files
-        switch filter {
-        case .all: break
-        case .issues: result = result.filter(\.hasIssues)
-        case .noMetadata: result = result.filter(\.hasNoMetadata)
-        case .complete: result = result.filter { !$0.hasIssues }
-        case .found: result = result.filter { scanner.lookupResults[$0.url]?.isFound == true }
-        }
+        result = result.filter { Self.fileMatches($0, filter: filter, lookupResults: scanner.lookupResults) }
         if !searchText.isEmpty {
             result = result.filter {
                 $0.fileName.localizedCaseInsensitiveContains(searchText)
@@ -88,6 +140,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 800, minHeight: 500)
         .toolbar { toolbarContent }
+        .labelStyle(.titleAndIcon)
         .searchable(text: $searchText, prompt: "Search file, title, artist, album")
         // Singles are commonly filed one folder per artist, so several can
         // be scanned as one library rather than scanning their shared
@@ -316,12 +369,19 @@ struct ContentView: View {
         }
     }
 
+    /// The summary bar and the filter control used to state the same
+    /// taxonomy twice — "Total/With issues/No metadata/Complete" as plain
+    /// counts, "All/Missing Metadata/No Metadata at All/Complete/Found" as
+    /// a separate segmented control right next to them, eating roughly
+    /// half the window's width on the long "No Metadata at All" label.
+    /// Merged here: each stat *is* the filter control, so there's one
+    /// taxonomy, shown once, and clicking a count is the same action as
+    /// picking it from a menu used to be.
     private var summaryBar: some View {
-        HStack(spacing: 20) {
-            stat("Total", scanner.files.count, color: .secondary)
-            stat("With issues", scanner.files.count(where: \.hasIssues), color: .orange)
-            stat("No metadata", scanner.files.count(where: \.hasNoMetadata), color: .red)
-            stat("Complete", scanner.files.count { !$0.hasIssues }, color: .green)
+        HStack(spacing: 6) {
+            ForEach(Self.filterStats(files: scanner.files, lookupResults: scanner.lookupResults)) { item in
+                filterStatButton(item)
+            }
             Spacer()
             if scanner.isLookingUp {
                 HStack(spacing: 6) {
@@ -339,22 +399,46 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Picker("Filter", selection: $filter) {
-                ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
-    private func stat(_ label: String, _ value: Int, color: Color) -> some View {
-        HStack(spacing: 6) {
-            Text("\(value)").font(.title3.weight(.semibold)).foregroundStyle(color)
-            Text(label).font(.callout).foregroundStyle(.secondary)
+    /// One stat-as-filter-button. Selection state is a tint + outline in
+    /// the stat's own severity colour (rather than, say, the system accent
+    /// colour) so selection and severity reinforce each other instead of
+    /// competing for attention — the count itself always keeps its colour,
+    /// selected or not, so it stays legible as a plain-language stat even
+    /// when you aren't using it to filter.
+    private func filterStatButton(_ item: FilterStat) -> some View {
+        let isSelected = filter == item.filter
+        return Button {
+            filter = item.filter
+        } label: {
+            HStack(spacing: 6) {
+                Text("\(item.count)")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(item.color)
+                Text(item.label)
+                    .font(.callout)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(item.color.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(item.color.opacity(0.5), lineWidth: 1)
+                }
+            }
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(item.count) \(item.label)")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityHint("Filters the results to \(item.label.lowercased())")
     }
 
     @ViewBuilder
@@ -474,9 +558,19 @@ struct ContentView: View {
             }
             .width(24)
 
+            // Files in one folder commonly share a long identical prefix
+            // and differ only at the end (e.g. "Arrested Development - "
+            // followed by "(Dubb Mix)", "(For DJ's Only)", "(Remix)") — tail
+            // truncation would cut exactly the part that tells rows apart,
+            // so this truncates from the middle instead. It's also the only
+            // column below with no width constraint, which otherwise loses
+            // every fight for space against the fixed-width columns.
             TableColumn("File", value: \.fileName) { file in
-                Text(file.fileName).help(file.url.path(percentEncoded: false))
+                Text(file.fileName)
+                    .truncationMode(.middle)
+                    .help(file.url.path(percentEncoded: false))
             }
+            .width(min: 160, ideal: 260)
 
             metadataColumns
 
@@ -496,12 +590,23 @@ struct ContentView: View {
                     }
                 }
             }
-            .width(min: 180)
+            // A single-issue file (the common case) only needs room for one
+            // small pill — this used to reserve 180pt regardless, the
+            // second-widest column in the table to show one badge. `ideal`
+            // still gives it room to grow for a file missing everything.
+            .width(min: 70, ideal: 130)
 
-            TableColumn("Lookup") { file in
-                lookupBadge(for: file)
+            // Lookup and Cutoff only ever hold data once "Find All
+            // Metadata" / "Check for Transcodes" has actually run — until
+            // then they're blank space (Lookup empty, Cutoff four em-dashes)
+            // reserved at the File column's expense. Shown only once there's
+            // something to show; see `showsLookupColumn`/`showsCutoffColumn`.
+            if Self.showsLookupColumn(lookupResults: scanner.lookupResults) {
+                TableColumn("Lookup") { file in
+                    lookupBadge(for: file)
+                }
+                .width(72)
             }
-            .width(72)
 
             TableColumn("Bitrate", value: \.bitrateSortKey) { file in
                 if let kbps = file.bitrateKbps {
@@ -512,10 +617,13 @@ struct ContentView: View {
                 }
             }
             .width(82)
-            TableColumn("Cutoff") { file in
-                spectralCutoffCell(for: file)
+
+            if Self.showsCutoffColumn(spectralResults: scanner.spectralResults) {
+                TableColumn("Cutoff") { file in
+                    spectralCutoffCell(for: file)
+                }
+                .width(82)
             }
-            .width(82)
             TableColumn("Length", value: \.formattedDuration).width(60)
             TableColumn("Size", value: \.formattedSize).width(80)
         }
