@@ -27,13 +27,17 @@ import SwiftUI
 ///   album/compilation, the common failure mode.
 ///
 /// The release/recording identity (title, year, genre, format, label,
-/// cover, provider link) is shown once per *section*, not once per file —
-/// every file in a folder found the same match, so repeating it per row
-/// just crowds out the one thing that actually varies file to file: how
-/// each file's own tags compare to it. That per-file comparison is a
-/// disclosure — collapsed by default (a batch can hold 30+ files) showing
-/// a compact, real-valued summary of what's actually changing, expandable
-/// to the full field-by-field table.
+/// cover, provider link) is shown once per *section* for Albums/
+/// Compilations, not once per file — every file in that kind of folder
+/// genuinely found the same match, so repeating it per row would just
+/// crowd out the one thing that actually varies file to file: how each
+/// file's own tags compare to it. Singles are the opposite case: a Singles
+/// folder's files are unrelated releases by definition (see
+/// `FoundMatchGroup.albumGroup`'s doc comment), so each file shows its own
+/// match identity on its own row instead — see `fileRow`. Either way, the
+/// per-file comparison itself is a disclosure — collapsed by default (a
+/// batch can hold 30+ files) showing a compact, real-valued summary of
+/// what's actually changing, expandable to the full field-by-field table.
 ///
 /// Discogs matches here never fill Title/Track Number — Discogs search
 /// results are release-level only (see `DiscogsRelease.fillableFields`'s
@@ -130,16 +134,31 @@ struct ApplyFoundMatchesSheetView: View {
 
     private var header: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Apply Found Matches").font(.headline)
-                Text("Review what each file's batch lookup found before writing it. \"Correct…\" re-searches one file; \"Re-match…\" re-searches a whole album/compilation.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            // No separate "Apply Found Matches" headline here — the window
+            // titlebar (`WindowGroup("Apply Found Matches", ...)` in
+            // CleanMyDigitalApp.swift) already says it; repeating it here
+            // was a pure duplicate.
+            Text(Self.headerSubtitle(groups: groups))
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer()
             Button("Done") { dismissWindow(id: "apply-found-matches") }
         }
         .padding()
+    }
+
+    /// Only mentions "Re-match…" when this batch actually has at least one
+    /// group with that control (`sectionShowsSharedMatchIdentity` — an
+    /// Albums or Compilations folder). A batch made entirely of Singles has
+    /// no group-level correction anywhere in it, only per-file "Correct…",
+    /// so describing a "Re-match…" affordance there would point at a
+    /// control that doesn't exist. A `static func` (not a computed
+    /// property) so it's testable without a live `LibraryScanner` — same
+    /// pattern as `ContentView.fileMatches`.
+    static func headerSubtitle(groups: [FoundMatchGroup]) -> String {
+        let base = "Review what each file's batch lookup found before writing it. \"Correct…\" re-searches one file"
+        guard groups.contains(where: sectionShowsSharedMatchIdentity) else { return base + "." }
+        return base + "; \"Re-match…\" re-searches a whole album/compilation."
     }
 
     @ViewBuilder
@@ -156,7 +175,13 @@ struct ApplyFoundMatchesSheetView: View {
                 ForEach(groups) { group in
                     Section {
                         ForEach(group.files) { file in
-                            fileRow(file)
+                            // Albums/Compilations share one release, shown
+                            // once in the section header (`sectionHeader`)
+                            // — but Singles files are unrelated releases by
+                            // definition, so each file shows its own match
+                            // here instead. Exact inverse of
+                            // `sectionShowsSharedMatchIdentity`.
+                            fileRow(file, showsOwnMatchIdentity: !Self.sectionShowsSharedMatchIdentity(for: group))
                         }
                     } header: {
                         sectionHeader(group)
@@ -176,7 +201,7 @@ struct ApplyFoundMatchesSheetView: View {
                     .labelsHidden()
                 VStack(alignment: .leading, spacing: 1) {
                     Text(sectionTitle(for: group)).font(.subheadline.weight(.semibold))
-                    Text(sectionSubtitle(for: group))
+                    Text(Self.sectionSubtitle(for: group))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -190,7 +215,10 @@ struct ApplyFoundMatchesSheetView: View {
                 }
             }
             // Every file in this folder found the same match — shown once
-            // here rather than repeated on every row below.
+            // here rather than repeated on every row below. Only true for
+            // Albums/Compilations; `representativeMatch` returns nil for a
+            // Singles folder, where each file's row shows its own match
+            // instead (see `fileRow`).
             if let match = representativeMatch(for: group) {
                 matchIdentity(candidate: match.candidate)
                     .padding(.leading, 26)
@@ -208,12 +236,15 @@ struct ApplyFoundMatchesSheetView: View {
     /// files that each resolve to their own, unrelated release, so
     /// implying they share one would be misleading. Albums/Compilations
     /// genuinely do share one release, so that's worth saying explicitly.
-    private func sectionSubtitle(for group: FoundMatchGroup) -> String {
+    /// A `static func` (not an instance method) so it's directly testable —
+    /// same pattern as `ContentView.fileMatches`.
+    static func sectionSubtitle(for group: FoundMatchGroup) -> String {
+        let files = group.files.count == 1 ? "file" : "files"
         guard let albumGroup = group.albumGroup else {
-            return "\(group.files.count) file(s) in this folder"
+            return "\(group.files.count) \(files) in this folder"
         }
         let noun = albumGroup.category == .compilations ? "compilation" : "album"
-        return "\(group.files.count) file(s) matched — correct the whole \(noun) if the release is wrong"
+        return "\(group.files.count) \(files) matched — correct the whole \(noun) if the release is wrong"
     }
 
     private func sectionSelectionBinding(for group: FoundMatchGroup) -> Binding<Bool> {
@@ -234,10 +265,30 @@ struct ApplyFoundMatchesSheetView: View {
     /// release. If a folder's files genuinely found different releases,
     /// this shows whichever was found first; each row's own "Correct…"
     /// still operates on that file specifically regardless.
+    ///
+    /// Only meaningful for Albums/Compilations — a Singles folder's files
+    /// are unrelated releases by definition (ten singles are ten different
+    /// records), so there's no single "representative" match to show for
+    /// one; this returns nil there rather than let the caller assert one
+    /// exists. `fileRow` shows each Singles file's own match instead.
     private func representativeMatch(
         for group: FoundMatchGroup
     ) -> (provider: MetadataProvider, candidate: LookupCandidate, fillable: Set<MetadataField>)? {
-        group.files.lazy.compactMap { found(for: $0) }.first
+        guard Self.sectionShowsSharedMatchIdentity(for: group) else { return nil }
+        return group.files.lazy.compactMap { found(for: $0) }.first
+    }
+
+    /// True only for Albums/Compilations (`group.albumGroup != nil`), where
+    /// every file in the folder genuinely resolved to the same release and
+    /// the section header can show that match once for all of them. False
+    /// for Singles, where each file is its own unrelated release — driving
+    /// both `representativeMatch` (returns nil there) and `fileRow`'s
+    /// per-file identity (shown there instead, as the exact inverse) from
+    /// one source of truth rather than two independent `albumGroup != nil`
+    /// checks that could drift apart. A `static func` so it's directly
+    /// testable — same pattern as `ContentView.fileMatches`.
+    static func sectionShowsSharedMatchIdentity(for group: FoundMatchGroup) -> Bool {
+        group.albumGroup != nil
     }
 
     // MARK: - File row
@@ -251,7 +302,12 @@ struct ApplyFoundMatchesSheetView: View {
         return (provider, candidate, fillable)
     }
 
-    private func fileRow(_ file: AudioFile) -> some View {
+    /// `showsOwnMatchIdentity` is true for a Singles folder (`albumGroup ==
+    /// nil`) — unlike Albums/Compilations, its files are unrelated releases
+    /// by definition, so there's no shared identity in the section header
+    /// above (see `representativeMatch`) and this file's own match is shown
+    /// right here instead.
+    private func fileRow(_ file: AudioFile, showsOwnMatchIdentity: Bool) -> some View {
         let found = found(for: file)
 
         return VStack(alignment: .leading, spacing: 4) {
@@ -275,10 +331,17 @@ struct ApplyFoundMatchesSheetView: View {
             }
 
             if let found {
+                if showsOwnMatchIdentity {
+                    matchIdentity(candidate: found.candidate)
+                        .padding(.leading, 26)
+                }
+
                 let comparisons = MatchComparisonBuilder.comparisons(
                     file: file, candidate: found.candidate, fillable: found.fillable)
-                disclosure(for: file, comparisons: comparisons, candidate: found.candidate, provider: found.provider)
-                    .padding(.leading, 26)
+                disclosure(
+                    for: file, comparisons: comparisons, candidate: found.candidate, provider: found.provider
+                )
+                .padding(.leading, 26)
             }
         }
         .padding(.vertical, 3)
@@ -301,7 +364,7 @@ struct ApplyFoundMatchesSheetView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 10)
                         .padding(.top, 3)
-                    collapsedSummary(comparisons)
+                    collapsedSummary(comparisons, provider: provider)
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
@@ -343,9 +406,11 @@ struct ApplyFoundMatchesSheetView: View {
     /// genre, and (Discogs only, since `MusicBrainzRecording` carries
     /// neither) format and label — plus cover art and, for Discogs, a link
     /// to the release page so a questionable match can be checked against
-    /// the real thing. Shown once per section (see `sectionHeader`); this
-    /// answers "which record was found," while each file's own disclosure
-    /// answers "how does it compare to what's already here."
+    /// the real thing. Shown once per section for Albums/Compilations
+    /// (see `sectionHeader`), where every file genuinely shares it, or once
+    /// per file for Singles (see `fileRow`), where it doesn't; this answers
+    /// "which record was found," while each file's own disclosure answers
+    /// "how does it compare to what's already here."
     @ViewBuilder
     private func matchIdentity(candidate: LookupCandidate) -> some View {
         HStack(alignment: .top, spacing: 8) {
@@ -390,15 +455,17 @@ struct ApplyFoundMatchesSheetView: View {
     // MARK: - Comparison summary (collapsed) and table (expanded)
 
     /// The collapsed disclosure label — real values, not verdicts. Leads
-    /// with every field that's actually changing (`.willFill`/
-    /// `.differsButKept`), each shown as "Field: current → match", since
-    /// that's the concrete question this whole sheet exists to answer;
-    /// agreeing fields follow as a compact confirmation line, since
-    /// agreement (especially on Album/Year) is the strongest signal a
-    /// match is correct even though it isn't itself actionable. Fields
-    /// with nothing to compare (`.noMatchData`) are left for the expanded
-    /// table — they don't inform "is this right?" either way.
-    private func collapsedSummary(_ comparisons: [MatchComparison]) -> some View {
+    /// with every field that's actually changing (`.willFill`, shown as
+    /// "Field: current → match" — an arrow, since it genuinely will) or
+    /// merely differing-but-kept (`.differsButKept`, shown with no arrow at
+    /// all — see `changeSummaryText`'s doc comment for why), since that's
+    /// the concrete question this whole sheet exists to answer; agreeing
+    /// fields follow as a compact confirmation line, since agreement
+    /// (especially on Album/Year) is the strongest signal a match is
+    /// correct even though it isn't itself actionable. Fields with nothing
+    /// to compare (`.noMatchData`) are left for the expanded table — they
+    /// don't inform "is this right?" either way.
+    private func collapsedSummary(_ comparisons: [MatchComparison], provider: MetadataProvider) -> some View {
         let changed = comparisons.filter { $0.outcome == .willFill || $0.outcome == .differsButKept }
         let agreed = comparisons.filter { $0.outcome == .agrees }
         return VStack(alignment: .leading, spacing: 2) {
@@ -408,7 +475,7 @@ struct ApplyFoundMatchesSheetView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(changed) { comparison in
-                    changeSummaryLine(comparison)
+                    changeSummaryLine(comparison, provider: provider)
                 }
             }
             if !agreed.isEmpty {
@@ -419,10 +486,8 @@ struct ApplyFoundMatchesSheetView: View {
         }
     }
 
-    private func changeSummaryLine(_ comparison: MatchComparison) -> some View {
-        let current = displayValue(comparison, isMatch: false)
-        let match = displayValue(comparison, isMatch: true)
-        let text = "\(comparison.field.rawValue): \(current) → \(match)"
+    private func changeSummaryLine(_ comparison: MatchComparison, provider: MetadataProvider) -> some View {
+        let (text, trailingLabel) = Self.changeSummaryText(comparison, provider: provider)
         return HStack(spacing: 4) {
             outcomeIndicator(comparison.outcome)
             Text(text)
@@ -430,9 +495,34 @@ struct ApplyFoundMatchesSheetView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(text)
-            Text(comparison.outcome == .willFill ? "will fill" : "kept (already set)")
+            Text(trailingLabel)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Reserves the arrow for `.willFill` — the only outcome where a value
+    /// actually changes on disk. `.differsButKept` (the app never
+    /// overwrites an existing tag) is phrased as a comparison instead, with
+    /// no arrow and no implied transformation: read plainly, "Artist:
+    /// Barraka → Ben Lost" says the tag is about to become "Ben Lost", which
+    /// is exactly backwards — it names which provider is making a *different*
+    /// claim than what's already there, not what's about to be written.
+    /// `collapsedSummary` only ever calls this with these two outcomes. A
+    /// `static func` (not folded directly into `changeSummaryLine`) so the
+    /// text itself — the thing the bug report is actually about — is
+    /// testable without rendering a view, same pattern as
+    /// `ContentView.fileMatches`.
+    static func changeSummaryText(
+        _ comparison: MatchComparison, provider: MetadataProvider
+    ) -> (text: String, trailingLabel: String) {
+        let current = displayValue(comparison, isMatch: false)
+        let match = displayValue(comparison, isMatch: true)
+        switch comparison.outcome {
+        case .willFill:
+            return ("\(comparison.field.rawValue): \(current) → \(match)", "will fill")
+        default:
+            return ("\(comparison.field.rawValue): \(current) — \(provider.rawValue) says \"\(match)\"", "kept (already set)")
         }
     }
 
@@ -442,7 +532,7 @@ struct ApplyFoundMatchesSheetView: View {
     /// unavailability note on the match side when there's genuinely
     /// nothing to compare, else an em dash. Never omits an empty value —
     /// that's the whole point of showing a pair rather than a verdict.
-    private func displayValue(_ comparison: MatchComparison, isMatch: Bool) -> String {
+    static func displayValue(_ comparison: MatchComparison, isMatch: Bool) -> String {
         let raw = isMatch ? comparison.matchValue : comparison.currentValue
         if comparison.field == .artwork {
             return raw == nil ? "none" : "cover"
