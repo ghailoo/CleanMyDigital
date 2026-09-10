@@ -36,8 +36,11 @@ import SwiftUI
 /// `FoundMatchGroup.albumGroup`'s doc comment), so each file shows its own
 /// match identity on its own row instead — see `fileRow`. Either way, the
 /// per-file comparison itself is a disclosure — collapsed by default (a
-/// batch can hold 30+ files) showing a compact, real-valued summary of
-/// what's actually changing, expandable to the full field-by-field table.
+/// batch can hold 30+ files, so a full field table per row is over 400
+/// lines before anyone expands anything) to one concrete line naming only
+/// the fields that will actually be written, expandable via a chevron on
+/// the file row to the full field-by-field table with real before/after
+/// values — see `collapsedSummary`.
 ///
 /// Discogs matches here never fill Title/Track Number — Discogs search
 /// results are release-level only (see `DiscogsRelease.fillableFields`'s
@@ -78,18 +81,23 @@ struct ApplyFoundMatchesSheetView: View {
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
     @State private var albumLookupGroup: AlbumGroup?
     /// Which files' full before/after comparison table is expanded — all
-    /// collapsed by default, since a batch can hold 30+ files and a full
-    /// field table per row would be unreadable at that scale. The
-    /// collapsed summary (see `collapsedSummary`) is the fast "is this the
-    /// right record?" check, naming real changed values, not just field
-    /// names; expanding is for when it looks wrong.
+    /// collapsed by default, since a batch can hold 30+ files and even one
+    /// concrete line per file (let alone a full field table) would be over
+    /// 400 lines before anyone expands anything at that scale. The
+    /// collapsed summary (see `collapsedSummary`) names exactly which
+    /// fields will actually be written, so it's still concrete, not just a
+    /// verdict — expanding is for the real before/after values, or when a
+    /// match looks like it might be the wrong release entirely.
     ///
-    /// Rendered as an explicit chevron `Button`, not a `DisclosureGroup` —
-    /// a `DisclosureGroup`'s built-in triangle reads as basically invisible
-    /// next to a wide multi-line custom label inside a `List` row, which
-    /// made the whole affordance easy to miss entirely. Same underlying
-    /// per-file expand/collapse state and behavior either way; only the
-    /// visual affordance changed, to make it unmistakable.
+    /// Rendered as an explicit chevron `Button` on the file row itself, not
+    /// a `DisclosureGroup` — a `DisclosureGroup`'s built-in triangle reads
+    /// as basically invisible next to a wide multi-line custom label inside
+    /// a `List` row, which made the whole affordance easy to miss entirely.
+    /// Same underlying per-file expand/collapse state and behavior either
+    /// way; only the visual affordance changed, to make it unmistakable —
+    /// and to sit beside the file's own name rather than beside whichever
+    /// comparison field happened to render first, which used to read as
+    /// controlling that one field instead of the whole file.
     @State private var expandedFileURLs: Set<URL> = []
 
     /// Every scanned file with a `.found` batch-lookup outcome, in table
@@ -307,13 +315,34 @@ struct ApplyFoundMatchesSheetView: View {
     /// by definition, so there's no shared identity in the section header
     /// above (see `representativeMatch`) and this file's own match is shown
     /// right here instead.
+    ///
+    /// The expand/collapse chevron lives in the top `HStack`, alongside the
+    /// selection `Toggle` and filename — not indented in with the
+    /// comparison content below it, where it used to sit beside the first
+    /// field line and read as controlling that field rather than the whole
+    /// file. See `expandedFileURLs`'s doc comment for why it's a plain
+    /// `Button` with its own chevron rather than a `DisclosureGroup`.
     private func fileRow(_ file: AudioFile, showsOwnMatchIdentity: Bool) -> some View {
         let found = found(for: file)
+        let isExpanded = expandedFileURLs.contains(file.url)
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 10) {
                 Toggle("", isOn: selectionBinding(for: file.url))
                     .labelsHidden()
+
+                if found != nil {
+                    Button {
+                        if isExpanded { expandedFileURLs.remove(file.url) } else { expandedFileURLs.insert(file.url) }
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 10)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.fileName).font(.callout).lineLimit(1)
@@ -338,44 +367,17 @@ struct ApplyFoundMatchesSheetView: View {
 
                 let comparisons = MatchComparisonBuilder.comparisons(
                     file: file, candidate: found.candidate, fillable: found.fillable)
-                disclosure(
-                    for: file, comparisons: comparisons, candidate: found.candidate, provider: found.provider
-                )
-                .padding(.leading, 26)
+
+                collapsedSummary(comparisons)
+                    .padding(.leading, 26)
+
+                if isExpanded {
+                    comparisonTable(comparisons, file: file, candidate: found.candidate, provider: found.provider)
+                        .padding(.leading, 26)
+                }
             }
         }
         .padding(.vertical, 3)
-    }
-
-    /// The visible expand/collapse control plus its content — see
-    /// `expandedFileURLs`'s doc comment for why this is a plain `Button`
-    /// with its own chevron rather than a `DisclosureGroup`.
-    private func disclosure(
-        for file: AudioFile, comparisons: [MatchComparison], candidate: LookupCandidate, provider: MetadataProvider
-    ) -> some View {
-        let isExpanded = expandedFileURLs.contains(file.url)
-        return VStack(alignment: .leading, spacing: 4) {
-            Button {
-                if isExpanded { expandedFileURLs.remove(file.url) } else { expandedFileURLs.insert(file.url) }
-            } label: {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 10)
-                        .padding(.top, 3)
-                    collapsedSummary(comparisons, provider: provider)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                comparisonTable(comparisons, file: file, candidate: candidate, provider: provider)
-                    .padding(.leading, 16)
-            }
-        }
     }
 
     private func selectionBinding(for url: URL) -> Binding<Bool> {
@@ -454,92 +456,79 @@ struct ApplyFoundMatchesSheetView: View {
 
     // MARK: - Comparison summary (collapsed) and table (expanded)
 
-    /// The collapsed disclosure label — real values, not verdicts. Leads
-    /// with every field that's actually changing (`.willFill`, shown as
-    /// "Field: current → match" — an arrow, since it genuinely will) or
-    /// merely differing-but-kept (`.differsButKept`, shown with no arrow at
-    /// all — see `changeSummaryText`'s doc comment for why), since that's
-    /// the concrete question this whole sheet exists to answer; agreeing
-    /// fields follow as a compact confirmation line, since agreement
-    /// (especially on Album/Year) is the strongest signal a match is
-    /// correct even though it isn't itself actionable. Fields with nothing
-    /// to compare (`.noMatchData`) are left for the expanded table — they
-    /// don't inform "is this right?" either way.
-    private func collapsedSummary(_ comparisons: [MatchComparison], provider: MetadataProvider) -> some View {
-        let changed = comparisons.filter { $0.outcome == .willFill || $0.outcome == .differsButKept }
-        let agreed = comparisons.filter { $0.outcome == .agrees }
-        return VStack(alignment: .leading, spacing: 2) {
-            if changed.isEmpty {
-                Text("No changes — every comparable field already agrees or has nothing to compare")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(changed) { comparison in
-                    changeSummaryLine(comparison, provider: provider)
-                }
-            }
-            if !agreed.isEmpty {
-                Text("Agrees: \(agreed.map(\.field.rawValue).joined(separator: ", "))")
-                    .font(.caption2)
-                    .foregroundStyle(.green)
-            }
-        }
-    }
+    /// The one collapsed line for a file — concrete, but a field name, not
+    /// a value: "Will fill: Year, Genre, Artwork". Differing-but-kept
+    /// fields (the common, harmless case — the app never overwrites, so
+    /// disagreement here is routine, not a warning) and agreeing fields are
+    /// left entirely for the expanded table, where their real values are
+    /// still shown; naming them here too was what made a single file take
+    /// five lines, which at 85 files was over 400 lines of scrolling before
+    /// anyone expanded anything.
+    ///
+    /// Deliberately doesn't walk back into pure abstraction either — an
+    /// earlier version of this view showed only field names and verdicts
+    /// with no real values anywhere, which was the original complaint the
+    /// field-by-field comparison exists to fix. This still names exactly
+    /// which fields will change; it just stops repeating their values
+    /// twice (once collapsed, once expanded) and leaves them to the one
+    /// place — the expanded table — a reviewer actually needs them.
+    ///
+    /// The one warning colour this window uses: a leading red flag when
+    /// `matchLooksLikelyWrong` — kept deliberately rare (two core identity
+    /// fields disagreeing at once, not the routine single differing field)
+    /// so it still means something across a batch of 85.
+    private func collapsedSummary(_ comparisons: [MatchComparison]) -> some View {
+        let willFillFields = comparisons.filter { $0.outcome == .willFill }.map(\.field.rawValue)
+        let looksLikelyWrong = Self.matchLooksLikelyWrong(comparisons)
 
-    private func changeSummaryLine(_ comparison: MatchComparison, provider: MetadataProvider) -> some View {
-        let (text, trailingLabel) = Self.changeSummaryText(comparison, provider: provider)
         return HStack(spacing: 4) {
-            outcomeIndicator(comparison.outcome)
-            Text(text)
+            if looksLikelyWrong {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .help("Artist and Album both differ from what's already on this file — this match may be the wrong release")
+            } else if !willFillFields.isEmpty {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundStyle(.blue)
+            }
+            Text(Self.collapsedSummaryText(willFillFields: willFillFields))
                 .font(.caption)
+                .fontWeight(willFillFields.isEmpty ? .regular : .medium)
+                // Presence follows consequence: a field that will actually
+                // be written reads in the full-strength label colour;
+                // "nothing to fill" recedes to secondary. Nothing here uses
+                // the warning colour just because a field differs — see
+                // `matchLooksLikelyWrong` for the one case that actually
+                // gets one, and `outcomeColor` for why `.differsButKept`
+                // itself no longer reads as a warning in the expanded table.
+                .foregroundStyle(willFillFields.isEmpty ? .secondary : .primary)
                 .lineLimit(1)
-                .truncationMode(.tail)
-                .help(text)
-            Text(trailingLabel)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 
-    /// Reserves the arrow for `.willFill` — the only outcome where a value
-    /// actually changes on disk. `.differsButKept` (the app never
-    /// overwrites an existing tag) is phrased as a comparison instead, with
-    /// no arrow and no implied transformation: read plainly, "Artist:
-    /// Barraka → Ben Lost" says the tag is about to become "Ben Lost", which
-    /// is exactly backwards — it names which provider is making a *different*
-    /// claim than what's already there, not what's about to be written.
-    /// `collapsedSummary` only ever calls this with these two outcomes. A
-    /// `static func` (not folded directly into `changeSummaryLine`) so the
-    /// text itself — the thing the bug report is actually about — is
-    /// testable without rendering a view, same pattern as
+    /// A `static func` (not folded into `collapsedSummary`) so the text
+    /// itself is testable without rendering a view — same pattern as
     /// `ContentView.fileMatches`.
-    static func changeSummaryText(
-        _ comparison: MatchComparison, provider: MetadataProvider
-    ) -> (text: String, trailingLabel: String) {
-        let current = displayValue(comparison, isMatch: false)
-        let match = displayValue(comparison, isMatch: true)
-        switch comparison.outcome {
-        case .willFill:
-            return ("\(comparison.field.rawValue): \(current) → \(match)", "will fill")
-        default:
-            return ("\(comparison.field.rawValue): \(current) — \(provider.rawValue) says \"\(match)\"", "kept (already set)")
+    static func collapsedSummaryText(willFillFields: [String]) -> String {
+        guard !willFillFields.isEmpty else {
+            return "No changes — every comparable field already agrees, differs but is kept, or has nothing to compare"
         }
+        return "Will fill: \(willFillFields.joined(separator: ", "))"
     }
 
-    /// The real string for one side of a comparison, for display — "none"/
-    /// "cover" for Artwork (which has no literal value, only presence; see
-    /// `MatchComparisonBuilder.artworkComparison`'s doc comment), the
-    /// unavailability note on the match side when there's genuinely
-    /// nothing to compare, else an em dash. Never omits an empty value —
-    /// that's the whole point of showing a pair rather than a verdict.
-    static func displayValue(_ comparison: MatchComparison, isMatch: Bool) -> String {
-        let raw = isMatch ? comparison.matchValue : comparison.currentValue
-        if comparison.field == .artwork {
-            return raw == nil ? "none" : "cover"
-        }
-        if let raw, !raw.isEmpty { return raw }
-        if isMatch, let note = comparison.unavailableNote { return note }
-        return "–"
+    /// The genuine red flag in this window: Artist AND Album both
+    /// `.differsButKept` at once — the strongest available signal (short of
+    /// actually opening "Correct…") that a match is the wrong release
+    /// entirely, not just missing a field or two. A single differing field
+    /// is the routine case every match can show without meaning anything is
+    /// wrong; two core identity fields disagreeing simultaneously is not.
+    /// Derived from `MatchComparisonBuilder`'s own outcome classification
+    /// rather than a parallel notion of severity, and deliberately this
+    /// narrow so it stays rare enough, across a real batch, to still mean
+    /// something. A `static func` so it's directly testable.
+    static func matchLooksLikelyWrong(_ comparisons: [MatchComparison]) -> Bool {
+        let artistDiffers = comparisons.first { $0.field == .artist }?.outcome == .differsButKept
+        let albumDiffers = comparisons.first { $0.field == .album }?.outcome == .differsButKept
+        return artistDiffers && albumDiffers
     }
 
     private func comparisonTable(
@@ -664,11 +653,18 @@ struct ApplyFoundMatchesSheetView: View {
         }
     }
 
+    /// `.differsButKept` deliberately does NOT get a warning colour —
+    /// nothing is written, so a field merely differing from the match is
+    /// the routine, harmless case every match can show; orange here read as
+    /// alarming for something that's actually inert. The one place this
+    /// window does flag genuine risk is `matchLooksLikelyWrong`'s red
+    /// triangle in `collapsedSummary`, derived from two fields disagreeing
+    /// at once rather than any single field's outcome.
     private func outcomeColor(_ outcome: MatchComparison.Outcome) -> Color {
         switch outcome {
         case .willFill: .blue
         case .agrees: .green
-        case .differsButKept: .orange
+        case .differsButKept: .secondary
         case .noMatchData: .secondary
         }
     }

@@ -70,66 +70,88 @@ struct ApplyFoundMatchesSheetViewTests {
         #expect(ApplyFoundMatchesSheetView.sectionSubtitle(for: group).contains("compilation"))
     }
 
-    // MARK: - changeSummaryText: an arrow only where a value will actually change
+    // MARK: - collapsedSummaryText: one concrete line naming only what will change
 
-    /// The bug: "Artist: Barraka → Ben Lost" and "Year: - → 2014" used the
-    /// same arrow for two opposite meanings — one meant "differs, and is
-    /// ignored", the other "becomes". This confirms the fix: only
-    /// `.willFill` gets an arrow at all.
-    @Test func willFillUsesAnArrowAndIsLabeledWillFill() {
-        let comparison = MatchComparison(
-            field: .year, currentValue: nil, matchValue: "2014", unavailableNote: nil, outcome: .willFill)
-        let (text, label) = ApplyFoundMatchesSheetView.changeSummaryText(comparison, provider: .discogs)
-        #expect(text == "Year: – → 2014")
-        #expect(label == "will fill")
+    /// The bug: the collapsed state listed every changed field — five
+    /// lines for a file with Artist/Album kept and Year/Genre/Artwork
+    /// filled — which at 85 files was over 400 lines before anyone
+    /// expanded anything. This confirms the fix: the collapsed line names
+    /// only the `.willFill` fields, nothing else.
+    @Test func namesOnlyTheFieldsThatWillActuallyBeWritten() {
+        #expect(ApplyFoundMatchesSheetView.collapsedSummaryText(willFillFields: ["Year", "Genre", "Artwork"])
+                == "Will fill: Year, Genre, Artwork")
     }
 
-    @Test func differsButKeptNeverContainsAnArrow() {
-        let comparison = MatchComparison(
-            field: .artist, currentValue: "Barraka", matchValue: "Ben Lost",
-            unavailableNote: nil, outcome: .differsButKept)
-        let (text, _) = ApplyFoundMatchesSheetView.changeSummaryText(comparison, provider: .discogs)
-        #expect(!text.contains("→"))
+    /// Still concrete, not a bare verdict — an earlier version of this view
+    /// showed only field names and abstract verdicts with no real values
+    /// anywhere, which was the original complaint the field-by-field
+    /// comparison exists to fix. Naming the exact fields (even without
+    /// their values, which stay in the expanded table) keeps this from
+    /// walking back into that abstraction.
+    @Test func collapsedTextNamesTheActualFieldsNotJustACount() {
+        let text = ApplyFoundMatchesSheetView.collapsedSummaryText(willFillFields: ["Year"])
+        #expect(text.contains("Year"))
     }
 
-    /// Names which provider is making the differing claim, since "Barraka —
-    /// says Ben Lost" alone doesn't say whose claim it is.
-    @Test func differsButKeptNamesTheProviderMakingTheDifferingClaim() {
-        let comparison = MatchComparison(
-            field: .artist, currentValue: "Barraka", matchValue: "Ben Lost",
-            unavailableNote: nil, outcome: .differsButKept)
-        let (discogsText, _) = ApplyFoundMatchesSheetView.changeSummaryText(comparison, provider: .discogs)
-        let (mbText, _) = ApplyFoundMatchesSheetView.changeSummaryText(comparison, provider: .musicBrainz)
-        #expect(discogsText.contains("Discogs"))
-        #expect(mbText.contains("MusicBrainz"))
+    @Test func collapsedTextForNoWillFillFieldsSaysNoChanges() {
+        #expect(ApplyFoundMatchesSheetView.collapsedSummaryText(willFillFields: []).hasPrefix("No changes"))
     }
 
-    @Test func differsButKeptStillNamesBothRealValues() {
-        let comparison = MatchComparison(
-            field: .artist, currentValue: "Barraka", matchValue: "Ben Lost",
-            unavailableNote: nil, outcome: .differsButKept)
-        let (text, label) = ApplyFoundMatchesSheetView.changeSummaryText(comparison, provider: .discogs)
-        #expect(text.contains("Barraka"))
-        #expect(text.contains("Ben Lost"))
-        #expect(label == "kept (already set)")
+    // MARK: - matchLooksLikelyWrong: the one warning colour in this window
+
+    /// The genuine red flag: Artist AND Album both differ-but-kept at once
+    /// — the strongest available signal the match is the wrong release
+    /// entirely, not just missing a field.
+    @Test func looksLikelyWrongWhenArtistAndAlbumBothDiffer() {
+        let comparisons = [
+            Self.makeComparison(.artist, outcome: .differsButKept),
+            Self.makeComparison(.album, outcome: .differsButKept),
+        ]
+        #expect(ApplyFoundMatchesSheetView.matchLooksLikelyWrong(comparisons))
     }
 
-    // MARK: - displayValue
+    /// A single differing field is the routine, harmless case every match
+    /// can show (the app never overwrites) — it must NOT trip the warning
+    /// alone, or the rare signal stops meaning anything.
+    @Test func doesNotLookLikelyWrongWhenOnlyOneFieldDiffers() {
+        let onlyArtist = [
+            Self.makeComparison(.artist, outcome: .differsButKept),
+            Self.makeComparison(.album, outcome: .agrees),
+        ]
+        #expect(!ApplyFoundMatchesSheetView.matchLooksLikelyWrong(onlyArtist))
 
-    @Test func displayValueShowsAnEmDashForAMissingNonArtworkValue() {
-        let comparison = MatchComparison(
-            field: .year, currentValue: nil, matchValue: "2014", unavailableNote: nil, outcome: .willFill)
-        #expect(ApplyFoundMatchesSheetView.displayValue(comparison, isMatch: false) == "–")
+        let onlyAlbum = [
+            Self.makeComparison(.artist, outcome: .willFill),
+            Self.makeComparison(.album, outcome: .differsButKept),
+        ]
+        #expect(!ApplyFoundMatchesSheetView.matchLooksLikelyWrong(onlyAlbum))
     }
 
-    @Test func displayValueUsesPresenceWordsForArtwork() {
-        let present = MatchComparison(
-            field: .artwork, currentValue: "Present", matchValue: nil, unavailableNote: nil, outcome: .noMatchData)
-        #expect(ApplyFoundMatchesSheetView.displayValue(present, isMatch: false) == "cover")
-        #expect(ApplyFoundMatchesSheetView.displayValue(present, isMatch: true) == "none")
+    @Test func doesNotLookLikelyWrongWhenBothAgree() {
+        let comparisons = [
+            Self.makeComparison(.artist, outcome: .agrees),
+            Self.makeComparison(.album, outcome: .agrees),
+        ]
+        #expect(!ApplyFoundMatchesSheetView.matchLooksLikelyWrong(comparisons))
+    }
+
+    /// Other fields differing (Year, Genre, …) don't factor in at all —
+    /// this is specifically about the two core identity fields.
+    @Test func otherDifferingFieldsDoNotTripTheWarning() {
+        let comparisons = [
+            Self.makeComparison(.artist, outcome: .agrees),
+            Self.makeComparison(.album, outcome: .agrees),
+            Self.makeComparison(.year, outcome: .differsButKept),
+            Self.makeComparison(.genre, outcome: .differsButKept),
+        ]
+        #expect(!ApplyFoundMatchesSheetView.matchLooksLikelyWrong(comparisons))
     }
 
     // MARK: - Fixtures
+
+    private static func makeComparison(_ field: MetadataField, outcome: MatchComparison.Outcome) -> MatchComparison {
+        MatchComparison(field: field, currentValue: "Current", matchValue: "Match", unavailableNote: nil, outcome: outcome)
+    }
 
     private static func makeGroup(
         hasAlbumGroup: Bool, category: LibraryCategory = .albums, fileCount: Int = 1
