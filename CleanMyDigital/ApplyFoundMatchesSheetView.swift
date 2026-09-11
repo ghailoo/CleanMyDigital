@@ -50,7 +50,6 @@ import SwiftUI
 struct ApplyFoundMatchesSheetView: View {
     let scanner: LibraryScanner
 
-    @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage("discogsToken") private var discogsToken = ""
     @AppStorage("backupOriginalsBeforeWriting") private var backupOriginalsBeforeWriting = true
 
@@ -126,15 +125,20 @@ struct ApplyFoundMatchesSheetView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        // No title — the window titlebar (`WindowGroup("Apply Found
+        // Matches", ...)` in CleanMyDigitalApp.swift) already says it;
+        // repeating it in the subtitle's headline was a pure duplicate.
+        // .wide — the per-file disclosure content is the tallest of any
+        // auxiliary window's.
+        SheetWindowContainer(
+            subtitle: Self.headerSubtitle(groups: groups),
+            windowID: "apply-found-matches",
+            size: .wide
+        ) {
             content
-            Divider()
+        } footer: {
             footer
         }
-        .frame(minWidth: 640, idealWidth: 780, maxWidth: .infinity,
-               minHeight: 440, idealHeight: 600, maxHeight: .infinity)
         .onAppear { syncSelection() }
         .onChange(of: scanner.lookupCompletedCount) { syncSelection() }
         .sheet(item: $metadataLookupFile) { file in
@@ -145,21 +149,6 @@ struct ApplyFoundMatchesSheetView: View {
             AlbumMetadataLookupView(group: group, scanner: scanner)
                 .onDisappear { syncSelection() }
         }
-    }
-
-    private var header: some View {
-        HStack {
-            // No separate "Apply Found Matches" headline here — the window
-            // titlebar (`WindowGroup("Apply Found Matches", ...)` in
-            // CleanMyDigitalApp.swift) already says it; repeating it here
-            // was a pure duplicate.
-            Text(Self.headerSubtitle(groups: groups))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("Done") { dismissWindow(id: "apply-found-matches") }
-        }
-        .padding()
     }
 
     /// Only mentions "Re-match…" when this batch actually has at least one

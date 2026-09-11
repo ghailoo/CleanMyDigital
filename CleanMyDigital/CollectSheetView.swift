@@ -8,8 +8,6 @@ import SwiftUI
 struct CollectSheetView: View {
     let scanner: LibraryScanner
 
-    @Environment(\.dismissWindow) private var dismissWindow
-
     @State private var proposals: [CollectionProposal] = []
     @State private var selection: Set<URL> = []
     @State private var isBusy = false
@@ -17,30 +15,16 @@ struct CollectSheetView: View {
     @State private var lastRunSummary: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        SheetWindowContainer(
+            title: "Collect into Folders",
+            subtitle: "Groups each Singles track's different mixes into a subfolder named after the release, using the Title tag.",
+            windowID: "collect-into-folders"
+        ) {
             content
-            Divider()
+        } footer: {
             footer
         }
-        .frame(minWidth: 640, idealWidth: 760, maxWidth: .infinity,
-               minHeight: 440, idealHeight: 520, maxHeight: .infinity)
         .onAppear { rebuildPlan() }
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Collect into Folders").font(.headline)
-                Text("Groups each Singles track's different mixes into a subfolder named after the release, using the Title tag.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Done") { dismissWindow(id: "collect-into-folders") }
-        }
-        .padding()
     }
 
     @ViewBuilder

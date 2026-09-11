@@ -8,8 +8,6 @@ import SwiftUI
 struct DuplicatesSheetView: View {
     let scanner: LibraryScanner
 
-    @Environment(\.dismissWindow) private var dismissWindow
-
     @State private var groups: [DuplicateGroup] = []
     @State private var selection: Set<URL> = []
     @State private var isBusy = false
@@ -17,30 +15,20 @@ struct DuplicatesSheetView: View {
     @State private var lastRunSummary: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        // .wide — this table's five trailing numeric columns (extension,
+        // bitrate, cutoff, size) genuinely need more room than the other
+        // windows' simpler two-column lists.
+        SheetWindowContainer(
+            title: "Find Duplicates",
+            subtitle: "Groups files sharing the same Artist and Title. The highest real quality — Cutoff first, then Bitrate — is kept; the rest are candidates to move aside.",
+            windowID: "find-duplicates",
+            size: .wide
+        ) {
             content
-            Divider()
+        } footer: {
             footer
         }
-        .frame(minWidth: 640, idealWidth: 820, maxWidth: .infinity,
-               minHeight: 440, idealHeight: 560, maxHeight: .infinity)
         .onAppear { rebuildPlan() }
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Find Duplicates").font(.headline)
-                Text("Groups files sharing the same Artist and Title. The highest real quality — Cutoff first, then Bitrate — is kept; the rest are candidates to move aside.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Done") { dismissWindow(id: "find-duplicates") }
-        }
-        .padding()
     }
 
     @ViewBuilder

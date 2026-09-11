@@ -12,8 +12,6 @@ import SwiftUI
 struct AlbumCompletenessSheetView: View {
     let scanner: LibraryScanner
 
-    @Environment(\.dismissWindow) private var dismissWindow
-
     @State private var groups: [AlbumGroup] = []
     @State private var albumLookupGroup: AlbumGroup?
     @State private var folderRenameProposals: [URL: AlbumFolderRenameProposal] = [:]
@@ -23,15 +21,15 @@ struct AlbumCompletenessSheetView: View {
     @State private var lastFolderChangeSummary: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        SheetWindowContainer(
+            title: "Check Album Completeness",
+            subtitle: "Groups Albums-category tracks by folder and checks each one's track-number tag for a stated total — check Discogs for albums the tags can't confirm.",
+            windowID: "check-album-completeness"
+        ) {
             content
-            Divider()
+        } footer: {
             footer
         }
-        .frame(minWidth: 640, idealWidth: 760, maxWidth: .infinity,
-               minHeight: 440, idealHeight: 520, maxHeight: .infinity)
         .onAppear { rebuild() }
         .sheet(item: $albumLookupGroup) { group in
             AlbumMetadataLookupView(group: group, scanner: scanner)
@@ -47,20 +45,6 @@ struct AlbumCompletenessSheetView: View {
         } message: { proposal in
             Text("\"\(proposal.currentFolderName)\" will be renamed to \"\(proposal.proposedFolderName)\".")
         }
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Check Album Completeness").font(.headline)
-                Text("Groups Albums-category tracks by folder and checks each one's track-number tag for a stated total — check Discogs for albums the tags can't confirm.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Done") { dismissWindow(id: "check-album-completeness") }
-        }
-        .padding()
     }
 
     @ViewBuilder

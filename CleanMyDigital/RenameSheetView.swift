@@ -8,8 +8,6 @@ import SwiftUI
 struct RenameSheetView: View {
     let scanner: LibraryScanner
 
-    @Environment(\.dismissWindow) private var dismissWindow
-
     @State private var proposals: [RenameProposal] = []
     @State private var selection: Set<URL> = []
     @State private var isBusy = false
@@ -17,30 +15,16 @@ struct RenameSheetView: View {
     @State private var lastRunSummary: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        SheetWindowContainer(
+            title: "Rename Files",
+            subtitle: "Renames files to \"Artist - Title\" (Albums/Compilations get a leading track number) using their tags.",
+            windowID: "rename-files"
+        ) {
             content
-            Divider()
+        } footer: {
             footer
         }
-        .frame(minWidth: 640, idealWidth: 760, maxWidth: .infinity,
-               minHeight: 440, idealHeight: 520, maxHeight: .infinity)
         .onAppear { rebuildPlan() }
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Rename Files").font(.headline)
-                Text("Renames files to \"Artist - Title\" (Albums/Compilations get a leading track number) using their tags.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Done") { dismissWindow(id: "rename-files") }
-        }
-        .padding()
     }
 
     @ViewBuilder
