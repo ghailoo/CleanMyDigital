@@ -165,7 +165,7 @@ struct DuplicatesSheetView: View {
 
         let succeededCount = outcomes.count - failedOutcomes.count
         lastRunSummary = failedOutcomes.isEmpty
-            ? "Moved \(succeededCount) file(s)."
+            ? "Moved \(pluralized(succeededCount, "file"))."
             : "Moved \(succeededCount), \(failedOutcomes.count) failed."
 
         rebuildPlan()
@@ -178,7 +178,7 @@ struct DuplicatesSheetView: View {
         let outcomes = await scanner.undoLastFileOperation()
         let failedCount = outcomes.count(where: { !$0.succeeded })
         lastRunSummary = failedCount == 0
-            ? "Undid \(outcomes.count) change(s)."
+            ? "Undid \(pluralized(outcomes.count, "change"))."
             : "Undid \(outcomes.count - failedCount), \(failedCount) failed."
         rebuildPlan()
     }

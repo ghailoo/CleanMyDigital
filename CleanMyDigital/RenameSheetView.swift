@@ -134,7 +134,7 @@ struct RenameSheetView: View {
         selection.subtract(succeededURLs)
 
         lastRunSummary = failedCount == 0
-            ? "Renamed \(succeededCount) file(s)."
+            ? "Renamed \(pluralized(succeededCount, "file"))."
             : "Renamed \(succeededCount), \(failedCount) failed."
     }
 
@@ -145,7 +145,7 @@ struct RenameSheetView: View {
         let outcomes = await scanner.undoLastFileOperation()
         let failedCount = outcomes.count(where: { !$0.succeeded })
         lastRunSummary = failedCount == 0
-            ? "Undid \(outcomes.count) rename(s)."
+            ? "Undid \(pluralized(outcomes.count, "rename"))."
             : "Undid \(outcomes.count - failedCount), \(failedCount) failed."
         rebuildPlan()
     }

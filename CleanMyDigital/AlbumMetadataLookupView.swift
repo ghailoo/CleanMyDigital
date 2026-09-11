@@ -51,7 +51,7 @@ struct AlbumMetadataLookupView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(selectedRelease == nil ? "Find Album on Discogs" : "Compare Album with Discogs")
                     .font(.headline)
-                Text("\(group.albumTitle ?? group.folderURL.lastPathComponent) — \(group.files.count) file(s)")
+                Text("\(group.albumTitle ?? group.folderURL.lastPathComponent) — \(pluralized(group.files.count, "file"))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -534,7 +534,7 @@ private struct AlbumComparisonView: View {
     private static func applySummaryText(
         applied: Int, appliedWithoutBackup: Int, alreadyComplete: Int, failed: Int, total: Int
     ) -> String {
-        var parts = ["Applied to \(applied) of \(total) file(s)"]
+        var parts = ["Applied to \(applied) of \(pluralized(total, "file"))"]
         if appliedWithoutBackup > 0 { parts.append("\(appliedWithoutBackup) without a backup") }
         if alreadyComplete > 0 { parts.append("\(alreadyComplete) already complete") }
         if failed > 0 { parts.append("\(failed) failed") }

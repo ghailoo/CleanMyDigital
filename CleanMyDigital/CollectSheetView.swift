@@ -128,7 +128,7 @@ struct CollectSheetView: View {
         selection.subtract(succeededURLs)
 
         lastRunSummary = failedCount == 0
-            ? "Moved \(succeededCount) file(s)."
+            ? "Moved \(pluralized(succeededCount, "file"))."
             : "Moved \(succeededCount), \(failedCount) failed."
     }
 
@@ -139,7 +139,7 @@ struct CollectSheetView: View {
         let outcomes = await scanner.undoLastFileOperation()
         let failedCount = outcomes.count(where: { !$0.succeeded })
         lastRunSummary = failedCount == 0
-            ? "Undid \(outcomes.count) change(s)."
+            ? "Undid \(pluralized(outcomes.count, "change"))."
             : "Undid \(outcomes.count - failedCount), \(failedCount) failed."
         rebuildPlan()
     }

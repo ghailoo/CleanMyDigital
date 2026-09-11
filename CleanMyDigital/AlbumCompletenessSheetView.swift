@@ -175,9 +175,9 @@ struct AlbumCompletenessSheetView: View {
     }
 
     private func missingLabel(count: Int, positions: [Int]) -> String {
-        guard !positions.isEmpty else { return "Missing \(count) track(s)" }
+        guard !positions.isEmpty else { return "Missing \(pluralized(count, "track"))" }
         let list = positions.map(String.init).joined(separator: ", ")
-        return "Missing track\(count == 1 ? "" : "s") \(list)"
+        return "Missing \(pluralWord(count, "track")) \(list)"
     }
 
     private func missingTracksLabel(_ titles: [String]) -> String {
@@ -187,7 +187,7 @@ struct AlbumCompletenessSheetView: View {
 
     private var footer: some View {
         HStack {
-            Text("\(groups.count) album(s)")
+            Text(pluralized(groups.count, "album"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if let lastFolderChangeSummary {
@@ -233,7 +233,7 @@ struct AlbumCompletenessSheetView: View {
         let outcomes = await scanner.undoLastFileOperation()
         let failedCount = outcomes.count(where: { !$0.succeeded })
         lastFolderChangeSummary = failedCount == 0
-            ? "Undid \(outcomes.count) change(s)."
+            ? "Undid \(pluralized(outcomes.count, "change"))."
             : "Undid \(outcomes.count - failedCount), \(failedCount) failed."
         rebuild()
     }

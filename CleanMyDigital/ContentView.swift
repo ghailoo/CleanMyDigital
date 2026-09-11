@@ -906,7 +906,7 @@ struct ContentView: View {
 
     private func copyReport() {
         let flagged = scanner.files.filter(\.hasIssues)
-        var lines = ["CleanMyDigital report — \(flagged.count) file(s) with issues"]
+        var lines = ["CleanMyDigital report — \(pluralized(flagged.count, "file")) with issues"]
         for file in flagged {
             let issues = file.isReadable
                 ? file.issues.map(\.label).joined(separator: ", ")

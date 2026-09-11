@@ -846,7 +846,7 @@ struct ApplyFoundMatchesSheetView: View {
     private static func summaryText(
         applied: Int, appliedWithoutBackup: Int, alreadyComplete: Int, failed: Int, total: Int
     ) -> String {
-        var parts = ["Applied to \(applied) of \(total) file(s)"]
+        var parts = ["Applied to \(applied) of \(pluralized(total, "file"))"]
         if appliedWithoutBackup > 0 { parts.append("\(appliedWithoutBackup) without a backup") }
         if alreadyComplete > 0 { parts.append("\(alreadyComplete) already complete") }
         if failed > 0 { parts.append("\(failed) failed") }
