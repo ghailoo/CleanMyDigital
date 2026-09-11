@@ -69,6 +69,13 @@ struct ApplyFoundMatchesSheetView: View {
     @State private var isApplying = false
     @State private var outcomesByURL: [URL: ApplyOutcome] = [:]
     @State private var applySummary: String?
+    /// How far `applySelected()` has gotten through its snapshot of
+    /// selected files — `applyTotalCount` is fixed for the run,
+    /// `applyCompletedCount` advances one file at a time. Exists because
+    /// `selection`/`targets` themselves can't be used for this mid-run: see
+    /// `footerStatusText`.
+    @State private var applyCompletedCount = 0
+    @State private var applyTotalCount = 0
     @State private var selection: Set<URL> = []
     /// Every target URL `selection` has ever been synced against — lets
     /// `syncSelection()` tell "a file that's new since last sync" (start it
@@ -368,7 +375,7 @@ struct ApplyFoundMatchesSheetView: View {
                 let comparisons = MatchComparisonBuilder.comparisons(
                     file: file, candidate: found.candidate, fillable: found.fillable)
 
-                collapsedSummary(comparisons)
+                collapsedSummary(comparisons, providerLabel: found.provider.rawValue)
                     .padding(.leading, 26)
 
                 if isExpanded {
@@ -419,6 +426,12 @@ struct ApplyFoundMatchesSheetView: View {
             artworkThumbnail(for: candidate)
             switch candidate {
             case .discogs(let release):
+                // Two lines, not three: title stays alone (the one thing
+                // that must be scannable at a glance), but year/genre/
+                // format/label and the Discogs link — rarely used, and not
+                // worth a whole line on its own — now share one quieter
+                // metadata row, the link reduced to a small icon rather
+                // than repeating "View on Discogs.com" per file/section.
                 VStack(alignment: .leading, spacing: 2) {
                     // `release.title` is already "Artist - Release Title" —
                     // Discogs' own combined format (see `DiscogsRelease.title`'s
@@ -431,13 +444,16 @@ struct ApplyFoundMatchesSheetView: View {
                         }
                         if !release.formattedFormat.isEmpty { Text(release.formattedFormat) }
                         if let label = release.label?.first { Text(label) }
+                        if let url = release.releasePageURL {
+                            Link(destination: url) {
+                                Image(systemName: "arrow.up.right.square")
+                            }
+                            .help("View on Discogs.com")
+                        }
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    if let url = release.releasePageURL {
-                        Link("View on Discogs.com", destination: url).font(.caption2)
-                    }
                 }
             case .musicBrainz(let recording):
                 VStack(alignment: .leading, spacing: 2) {
@@ -456,64 +472,95 @@ struct ApplyFoundMatchesSheetView: View {
 
     // MARK: - Comparison summary (collapsed) and table (expanded)
 
-    /// The one collapsed line for a file — concrete, but a field name, not
-    /// a value: "Will fill: Year, Genre, Artwork". Differing-but-kept
-    /// fields (the common, harmless case — the app never overwrites, so
-    /// disagreement here is routine, not a warning) and agreeing fields are
-    /// left entirely for the expanded table, where their real values are
-    /// still shown; naming them here too was what made a single file take
-    /// five lines, which at 85 files was over 400 lines of scrolling before
-    /// anyone expanded anything.
+    /// The collapsed state for a file — up to three lines, each naming real
+    /// values, never just field names or bare verdicts (an earlier version
+    /// of this view showed only field names and verdicts with no real
+    /// values anywhere, which is the complaint the field-by-field
+    /// comparison exists to fix):
     ///
-    /// Deliberately doesn't walk back into pure abstraction either — an
-    /// earlier version of this view showed only field names and verdicts
-    /// with no real values anywhere, which was the original complaint the
-    /// field-by-field comparison exists to fix. This still names exactly
-    /// which fields will change; it just stops repeating their values
-    /// twice (once collapsed, once expanded) and leaves them to the one
-    /// place — the expanded table — a reviewer actually needs them.
+    /// - **Fills** — fields that are empty on the file and have a value in
+    ///   the match (`.willFill`). There is no "before" for these — the
+    ///   current value is always nothing — so this shows only the incoming
+    ///   value, never an arrow from an empty left-hand side.
+    /// - **Keeps** — fields that already have a value on the file *and* a
+    ///   different one in the match (`.differsButKept`). This is the one
+    ///   outcome where both sides matter (nothing is written, but a human
+    ///   should see what disagreed), so it's the only line that shows both.
+    /// - A **risky-match** line when `matchLooksLikelyWrong` — the flag has
+    ///   to say in words why it's flagged, not just show a triangle next to
+    ///   text that reads identically to an unflagged row.
     ///
-    /// The one warning colour this window uses: a leading red flag when
-    /// `matchLooksLikelyWrong` — kept deliberately rare (two core identity
-    /// fields disagreeing at once, not the routine single differing field)
-    /// so it still means something across a batch of 85.
-    private func collapsedSummary(_ comparisons: [MatchComparison]) -> some View {
-        let willFillFields = comparisons.filter { $0.outcome == .willFill }.map(\.field.rawValue)
-        let looksLikelyWrong = Self.matchLooksLikelyWrong(comparisons)
+    /// Agreeing and no-data fields are left entirely for the expanded
+    /// table, where their real values are still shown — naming them here
+    /// too was what made a single file take five lines, which at 85 files
+    /// was over 400 lines of scrolling before anyone expanded anything.
+    /// When neither Fills nor Keeps has anything, a single "No changes"
+    /// line takes their place.
+    @ViewBuilder
+    private func collapsedSummary(_ comparisons: [MatchComparison], providerLabel: String) -> some View {
+        let fills = comparisons.filter { $0.outcome == .willFill }
+        let keeps = comparisons.filter { $0.outcome == .differsButKept }
+        let fillsText = Self.fillsLineText(fills)
+        let keepsText = Self.keepsLineText(keeps, providerLabel: providerLabel)
 
-        return HStack(spacing: 4) {
-            if looksLikelyWrong {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                    .help("Artist and Album both differ from what's already on this file — this match may be the wrong release")
-            } else if !willFillFields.isEmpty {
-                Image(systemName: "arrow.down.circle.fill")
-                    .foregroundStyle(.blue)
+        VStack(alignment: .leading, spacing: 2) {
+            if let fillsText {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(.blue).font(.caption2)
+                    Text("Fills").font(.caption.weight(.semibold))
+                    Text(fillsText).font(.caption).lineLimit(1).help(fillsText)
+                }
             }
-            Text(Self.collapsedSummaryText(willFillFields: willFillFields))
-                .font(.caption)
-                .fontWeight(willFillFields.isEmpty ? .regular : .medium)
-                // Presence follows consequence: a field that will actually
-                // be written reads in the full-strength label colour;
-                // "nothing to fill" recedes to secondary. Nothing here uses
-                // the warning colour just because a field differs — see
-                // `matchLooksLikelyWrong` for the one case that actually
-                // gets one, and `outcomeColor` for why `.differsButKept`
-                // itself no longer reads as a warning in the expanded table.
-                .foregroundStyle(willFillFields.isEmpty ? .secondary : .primary)
-                .lineLimit(1)
+            if let keepsText {
+                HStack(spacing: 4) {
+                    Text("Keeps").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(keepsText).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(keepsText)
+                }
+            }
+            if Self.matchLooksLikelyWrong(comparisons) {
+                Label(Self.likelyWrongText, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if fillsText == nil, keepsText == nil {
+                Text(Self.noChangesText).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
-    /// A `static func` (not folded into `collapsedSummary`) so the text
-    /// itself is testable without rendering a view — same pattern as
-    /// `ContentView.fileMatches`.
-    static func collapsedSummaryText(willFillFields: [String]) -> String {
-        guard !willFillFields.isEmpty else {
-            return "No changes — every comparable field already agrees, differs but is kept, or has nothing to compare"
-        }
-        return "Will fill: \(willFillFields.joined(separator: ", "))"
+    /// "Fills   Year 1997 · Genre Electronic, Garage House · Artwork ✓" —
+    /// the incoming value only, no arrow and no empty left-hand side, since
+    /// `.willFill` means the file's field is empty by definition (see
+    /// `MatchComparison.Outcome.willFill`'s doc comment). Artwork has no
+    /// meaningful "value" to print (its comparison values are just
+    /// presence markers — see `MatchComparisonBuilder.artworkComparison`),
+    /// so it gets a checkmark instead. `nil` when there's nothing to fill,
+    /// so the caller can tell "no line" apart from "line with no fields."
+    static func fillsLineText(_ fills: [MatchComparison]) -> String? {
+        guard !fills.isEmpty else { return nil }
+        return fills.map { comparison in
+            comparison.field == .artwork ? "Artwork ✓" : "\(comparison.field.rawValue) \(comparison.matchValue ?? "–")"
+        }.joined(separator: " · ")
     }
+
+    /// "Artist "Byron Stingily" · Discogs says "Byron Stingily Featuring
+    /// Leee John"" — the only collapsed line with two sides, since
+    /// `.differsButKept` is the only outcome where both the file's current
+    /// value and the match's differ and neither is nothing (see
+    /// `MatchComparison.Outcome.differsButKept`'s doc comment). Several
+    /// differing fields join on each side in the same order, so "Artist …,
+    /// Album …" on the left lines up with "…, …" on the right. `nil` when
+    /// nothing differs, matching `fillsLineText`.
+    static func keepsLineText(_ keeps: [MatchComparison], providerLabel: String) -> String? {
+        guard !keeps.isEmpty else { return nil }
+        let current = keeps.map { "\($0.field.rawValue) \"\($0.currentValue ?? "")\"" }.joined(separator: ", ")
+        let matched = keeps.map { "\"\($0.matchValue ?? "")\"" }.joined(separator: ", ")
+        return "\(current) · \(providerLabel) says \(matched)"
+    }
+
+    static let likelyWrongText = "Artist and Album both differ — check this release"
+
+    static let noChangesText = "No changes — every comparable field already agrees or has nothing to compare"
 
     /// The genuine red flag in this window: Artist AND Album both
     /// `.differsButKept` at once — the strongest available signal (short of
@@ -706,7 +753,9 @@ struct ApplyFoundMatchesSheetView: View {
 
     private var footer: some View {
         HStack {
-            Text("\(selection.count) of \(targets.count) selected")
+            Text(Self.footerStatusText(
+                isApplying: isApplying, selectedCount: selection.count, targetCount: targets.count,
+                completed: applyCompletedCount, total: applyTotalCount))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if let applySummary {
@@ -719,6 +768,23 @@ struct ApplyFoundMatchesSheetView: View {
                 .disabled(selection.isEmpty || isApplying)
         }
         .padding()
+    }
+
+    /// While idle, the ordinary "N of M selected" count. While applying,
+    /// `selection` is a frozen pre-apply snapshot but `targets` shrinks
+    /// live as each file's `lookupResults` entry clears
+    /// (`applyTagChanges`) — dividing the frozen numerator by the live,
+    /// shrinking denominator could show more files selected than exist
+    /// ("130 of 108 selected"). The selection is being consumed, not
+    /// browsed, during a run, so this shows progress against the run's own
+    /// fixed snapshot instead — always coherent by construction. A
+    /// `static func` so it's testable without a live view — same pattern
+    /// as `ContentView.fileMatches`.
+    static func footerStatusText(
+        isApplying: Bool, selectedCount: Int, targetCount: Int, completed: Int, total: Int
+    ) -> String {
+        guard isApplying else { return "\(selectedCount) of \(targetCount) selected" }
+        return "Applying \(completed) of \(total)…"
     }
 
     // MARK: - Selection lifecycle
@@ -744,12 +810,15 @@ struct ApplyFoundMatchesSheetView: View {
         outcomesByURL = [:]
 
         let files = selectedTargets
+        applyTotalCount = files.count
+        applyCompletedCount = 0
         var appliedCount = 0
         var appliedWithoutBackupCount = 0
         var alreadyCompleteCount = 0
         var failedCount = 0
 
         for file in files {
+            defer { applyCompletedCount += 1 }
             guard case .found(_, let candidate, let fillable) = scanner.lookupResults[file.url] else { continue }
 
             do {
