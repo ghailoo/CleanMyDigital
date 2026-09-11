@@ -286,11 +286,17 @@ struct ContentView: View {
     private var resultsTable: some View {
         VStack(spacing: 0) {
             if let example = scanner.misrootedArtistFolderExample {
-                misrootedFolderWarningBanner(example: example)
-                Divider()
+                Group {
+                    misrootedFolderWarningBanner(example: example)
+                    Divider()
+                }
+                .transition(.opacity)
             } else if scanner.artistOverrideAutoDetected, let artist = scanner.artistOverride {
-                autoDetectedArtistFolderBanner(artist: artist)
-                Divider()
+                Group {
+                    autoDetectedArtistFolderBanner(artist: artist)
+                    Divider()
+                }
+                .transition(.opacity)
             }
             summaryBar
             Divider()
@@ -304,6 +310,11 @@ struct ContentView: View {
                 table
             }
         }
+        // The banner appears/disappears as a side effect of a rescan
+        // completing, shifting every row below it — an instant pop reads as
+        // a layout glitch, a quick fade reads as "something just finished".
+        .animation(.easeOut(duration: 0.2), value: scanner.misrootedArtistFolderExample)
+        .animation(.easeOut(duration: 0.2), value: scanner.artistOverrideAutoDetected)
     }
 
     /// Warns when the scanned folder looks like it was rooted one level too
@@ -380,7 +391,7 @@ struct ContentView: View {
     private var summaryBar: some View {
         HStack(spacing: 6) {
             ForEach(Self.filterStats(files: scanner.files, lookupResults: scanner.lookupResults)) { item in
-                filterStatButton(item)
+                FilterStatButton(item: item, isSelected: filter == item.filter) { filter = item.filter }
             }
             Spacer()
             if scanner.isLookingUp {
@@ -404,42 +415,6 @@ struct ContentView: View {
         .padding(.vertical, 8)
     }
 
-    /// One stat-as-filter-button. Selection state is a tint + outline in
-    /// the stat's own severity colour (rather than, say, the system accent
-    /// colour) so selection and severity reinforce each other instead of
-    /// competing for attention — the count itself always keeps its colour,
-    /// selected or not, so it stays legible as a plain-language stat even
-    /// when you aren't using it to filter.
-    private func filterStatButton(_ item: FilterStat) -> some View {
-        let isSelected = filter == item.filter
-        return Button {
-            filter = item.filter
-        } label: {
-            HStack(spacing: 6) {
-                Text("\(item.count)")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(item.color)
-                Text(item.label)
-                    .font(.callout)
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-            .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(item.color.opacity(0.15))
-                    RoundedRectangle(cornerRadius: 7)
-                        .strokeBorder(item.color.opacity(0.5), lineWidth: 1)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(item.count) \(item.label)")
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityHint("Filters the results to \(item.label.lowercased())")
-    }
 
     @ViewBuilder
     private func artworkThumbnailView(for file: AudioFile) -> some View {
@@ -480,6 +455,7 @@ struct ContentView: View {
                 // Which provider matched is only in the tooltip, so it's
                 // folded into the spoken label rather than lost.
                 .accessibilityLabel("Match found via \(provider.rawValue)")
+                .transition(.opacity)
         case .noMatch:
             Text("No match")
                 .font(.caption2)
@@ -487,6 +463,7 @@ struct ContentView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.gray.opacity(0.15), in: Capsule())
+                .transition(.opacity)
         case nil:
             EmptyView()
         }
@@ -604,6 +581,10 @@ struct ContentView: View {
             if Self.showsLookupColumn(lookupResults: scanner.lookupResults) {
                 TableColumn("Lookup") { file in
                     lookupBadge(for: file)
+                        // Badges fill in one at a time as a batch lookup
+                        // runs — an instant pop reads as flicker, a quick
+                        // fade reads as results arriving.
+                        .animation(.easeOut(duration: 0.2), value: scanner.lookupResults[file.url]?.isFound)
                 }
                 .width(72)
             }
@@ -1015,6 +996,53 @@ private extension Color {
 
 private extension Optional where Wrapped == String {
     var orDash: String { self?.isEmpty == false ? self! : "–" }
+}
+
+/// One stat-as-filter-button. Selection state is a tint + outline in the
+/// stat's own severity colour (rather than, say, the system accent colour)
+/// so selection and severity reinforce each other instead of competing for
+/// attention — the count itself always keeps its colour, selected or not,
+/// so it stays legible as a plain-language stat even when you aren't using
+/// it to filter. A subtle hover tint gives the same feedback a selected
+/// state does, so the button reads as clickable before the first click.
+private struct FilterStatButton: View {
+    let item: ContentView.FilterStat
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text("\(item.count)")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(item.color)
+                Text(item.label)
+                    .font(.callout)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(item.color.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(item.color.opacity(0.5), lineWidth: 1)
+                } else if isHovering {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.primary.opacity(0.06))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel("\(item.count) \(item.label)")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityHint("Filters the results to \(item.label.lowercased())")
+    }
 }
 
 /// One row in the launch category prompt — icon, title, description, and a

@@ -93,6 +93,7 @@ struct RenameSheetView: View {
                 Text(lastRunSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
             Spacer()
             if scanner.canUndoLastFileOperation {
@@ -104,6 +105,9 @@ struct RenameSheetView: View {
                 .disabled(selection.isEmpty || isBusy)
         }
         .padding()
+        // Appears once a rename/undo batch finishes — a fade reads as
+        // "done", an instant pop reads as a layout glitch.
+        .animation(.easeOut(duration: 0.2), value: lastRunSummary)
     }
 
     private func selectionBinding(for id: URL) -> Binding<Bool> {
