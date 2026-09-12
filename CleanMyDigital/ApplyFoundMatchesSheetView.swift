@@ -165,35 +165,37 @@ struct ApplyFoundMatchesSheetView: View {
         return base + "; \"Re-match…\" re-searches a whole album/compilation."
     }
 
-    @ViewBuilder
     private var content: some View {
-        if targets.isEmpty {
-            ContentUnavailableView {
-                Label("No Found Matches", systemImage: "magnifyingglass")
-            } description: {
-                Text("Run \"Find All Metadata\" first, then come back here to review and apply what it found.")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List {
-                ForEach(groups) { group in
-                    Section {
-                        ForEach(group.files) { file in
-                            // Albums/Compilations share one release, shown
-                            // once in the section header (`sectionHeader`)
-                            // — but Singles files are unrelated releases by
-                            // definition, so each file shows its own match
-                            // here instead. Exact inverse of
-                            // `sectionShowsSharedMatchIdentity`.
-                            fileRow(file, showsOwnMatchIdentity: !Self.sectionShowsSharedMatchIdentity(for: group))
+        Group {
+            if targets.isEmpty {
+                ContentUnavailableView {
+                    Label("No Found Matches", systemImage: "magnifyingglass")
+                } description: {
+                    Text("Run \"Find All Metadata\" first, then come back here to review and apply what it found.")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(groups) { group in
+                        Section {
+                            ForEach(group.files) { file in
+                                // Albums/Compilations share one release, shown
+                                // once in the section header (`sectionHeader`)
+                                // — but Singles files are unrelated releases by
+                                // definition, so each file shows its own match
+                                // here instead. Exact inverse of
+                                // `sectionShowsSharedMatchIdentity`.
+                                fileRow(file, showsOwnMatchIdentity: !Self.sectionShowsSharedMatchIdentity(for: group))
+                            }
+                        } header: {
+                            sectionHeader(group)
                         }
-                    } header: {
-                        sectionHeader(group)
                     }
                 }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
+        .consistentAnimation(targets.isEmpty)
     }
 
     // MARK: - Section header (folder identity + the shared match identity)
@@ -373,10 +375,12 @@ struct ApplyFoundMatchesSheetView: View {
                 if isExpanded {
                     comparisonTable(comparisons, file: file, candidate: found.candidate, provider: found.provider)
                         .padding(.leading, 26)
+                        .transition(.opacity)
                 }
             }
         }
         .padding(.vertical, 3)
+        .consistentAnimation(isExpanded)
     }
 
     private func selectionBinding(for url: URL) -> Binding<Bool> {
@@ -762,6 +766,7 @@ struct ApplyFoundMatchesSheetView: View {
                 .foregroundStyle(.secondary)
             if let applySummary {
                 Text(applySummary).font(.caption).foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
             Spacer()
             if isApplying { ProgressView().controlSize(.small) }
@@ -770,6 +775,9 @@ struct ApplyFoundMatchesSheetView: View {
                 .disabled(selection.isEmpty || isApplying)
         }
         .padding()
+        // Appears once an apply run finishes — same reasoning as
+        // RenameSheetView's footer.
+        .consistentAnimation(applySummary)
     }
 
     /// While idle, the ordinary "N of M selected" count. While applying,

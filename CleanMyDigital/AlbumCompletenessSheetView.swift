@@ -47,21 +47,23 @@ struct AlbumCompletenessSheetView: View {
         }
     }
 
-    @ViewBuilder
     private var content: some View {
-        if groups.isEmpty {
-            ContentUnavailableView {
-                Label("No Albums Found", systemImage: "opticaldisc")
-            } description: {
-                Text("Scan a folder as Albums to check whether each one has its full tracklist.")
+        Group {
+            if groups.isEmpty {
+                ContentUnavailableView {
+                    Label("No Albums Found", systemImage: "opticaldisc")
+                } description: {
+                    Text("Scan a folder as Albums to check whether each one has its full tracklist.")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(groups) { group in
+                    albumRow(group)
+                }
+                .listStyle(.inset)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List(groups) { group in
-                albumRow(group)
-            }
-            .listStyle(.inset)
         }
+        .consistentAnimation(groups.isEmpty)
     }
 
     private func albumRow(_ group: AlbumGroup) -> some View {
@@ -194,6 +196,7 @@ struct AlbumCompletenessSheetView: View {
                 Text(lastFolderChangeSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
             Spacer()
             if scanner.canUndoLastFileOperation {
@@ -202,6 +205,9 @@ struct AlbumCompletenessSheetView: View {
             }
         }
         .padding()
+        // Appears once a folder rename/undo finishes — same reasoning as
+        // RenameSheetView's footer.
+        .consistentAnimation(lastFolderChangeSummary)
     }
 
     private func rebuild() {

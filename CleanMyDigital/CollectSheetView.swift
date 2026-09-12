@@ -27,18 +27,20 @@ struct CollectSheetView: View {
         .onAppear { rebuildPlan() }
     }
 
-    @ViewBuilder
     private var content: some View {
-        if proposals.isEmpty {
-            ContentUnavailableView {
-                Label("Nothing to Collect", systemImage: "checkmark.circle")
-            } description: {
-                Text("Every Singles file is already inside a folder matching its release name, or is missing a Title tag.")
+        Group {
+            if proposals.isEmpty {
+                ContentUnavailableView {
+                    Label("Nothing to Collect", systemImage: "checkmark.circle")
+                } description: {
+                    Text("Every Singles file is already inside a folder matching its release name, or is missing a Title tag.")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                table
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            table
         }
+        .consistentAnimation(proposals.isEmpty)
     }
 
     private var table: some View {
@@ -76,6 +78,7 @@ struct CollectSheetView: View {
                 Text(lastRunSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
             Spacer()
             if scanner.canUndoLastFileOperation {
@@ -87,6 +90,9 @@ struct CollectSheetView: View {
                 .disabled(selection.isEmpty || isBusy)
         }
         .padding()
+        // Appears once a collect/undo batch finishes — same reasoning as
+        // RenameSheetView's footer.
+        .consistentAnimation(lastRunSummary)
     }
 
     private func selectionBinding(for id: URL) -> Binding<Bool> {

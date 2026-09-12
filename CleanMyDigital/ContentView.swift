@@ -138,6 +138,9 @@ struct ContentView: View {
                 resultsTable
             }
         }
+        // Cross-fades idle → scanning → results instead of a hard cut,
+        // without animating the table's own rows once we're in it.
+        .consistentAnimation(scanner.state)
         .frame(minWidth: 800, minHeight: 500)
         .toolbar { toolbarContent }
         .labelStyle(.titleAndIcon)
@@ -313,8 +316,8 @@ struct ContentView: View {
         // The banner appears/disappears as a side effect of a rescan
         // completing, shifting every row below it — an instant pop reads as
         // a layout glitch, a quick fade reads as "something just finished".
-        .animation(.easeOut(duration: 0.2), value: scanner.misrootedArtistFolderExample)
-        .animation(.easeOut(duration: 0.2), value: scanner.artistOverrideAutoDetected)
+        .consistentAnimation(scanner.misrootedArtistFolderExample)
+        .consistentAnimation(scanner.artistOverrideAutoDetected)
     }
 
     /// Warns when the scanned folder looks like it was rooted one level too
@@ -584,7 +587,7 @@ struct ContentView: View {
                         // Badges fill in one at a time as a batch lookup
                         // runs — an instant pop reads as flicker, a quick
                         // fade reads as results arriving.
-                        .animation(.easeOut(duration: 0.2), value: scanner.lookupResults[file.url]?.isFound)
+                        .consistentAnimation(scanner.lookupResults[file.url]?.isFound)
                 }
                 .width(72)
             }

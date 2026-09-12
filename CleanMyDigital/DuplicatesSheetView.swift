@@ -31,30 +31,32 @@ struct DuplicatesSheetView: View {
         .onAppear { rebuildPlan() }
     }
 
-    @ViewBuilder
     private var content: some View {
-        if groups.isEmpty {
-            ContentUnavailableView {
-                Label("No Duplicates Found", systemImage: "checkmark.circle")
-            } description: {
-                Text("No two files share the same Artist and Title tags.")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List {
-                ForEach(groups) { group in
-                    Section {
-                        fileRow(group.keeper, isKeeper: true)
-                        ForEach(group.extras) { file in
-                            fileRow(file, isKeeper: false)
+        Group {
+            if groups.isEmpty {
+                ContentUnavailableView {
+                    Label("No Duplicates Found", systemImage: "checkmark.circle")
+                } description: {
+                    Text("No two files share the same Artist and Title tags.")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(groups) { group in
+                        Section {
+                            fileRow(group.keeper, isKeeper: true)
+                            ForEach(group.extras) { file in
+                                fileRow(file, isKeeper: false)
+                            }
+                        } header: {
+                            Text("\(group.keeper.artist ?? "") – \(group.keeper.title ?? "")")
                         }
-                    } header: {
-                        Text("\(group.keeper.artist ?? "") – \(group.keeper.title ?? "")")
                     }
                 }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
+        .consistentAnimation(groups.isEmpty)
     }
 
     private func fileRow(_ file: AudioFile, isKeeper: Bool) -> some View {
@@ -116,6 +118,7 @@ struct DuplicatesSheetView: View {
                 Text(lastRunSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
             Spacer()
             if scanner.canUndoLastFileOperation {
@@ -127,6 +130,9 @@ struct DuplicatesSheetView: View {
                 .disabled(selection.isEmpty || isBusy)
         }
         .padding()
+        // Appears once a move/undo batch finishes — same reasoning as
+        // RenameSheetView's footer.
+        .consistentAnimation(lastRunSummary)
     }
 
     private var totalExtrasCount: Int {

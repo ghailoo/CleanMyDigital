@@ -5,6 +5,34 @@
 
 import SwiftUI
 
+/// The one motion curve for every state change that would otherwise hard-cut
+/// — empty state ↔ results, a banner appearing/disappearing, a list
+/// repopulating after an apply/correction/rescan, a disclosure row expanding.
+/// Critically damped (no bounce/overshoot), restrained for a macOS utility;
+/// used everywhere via `View.consistentAnimation(_:)` below rather than each
+/// call site inventing its own curve and duration.
+extension Animation {
+    static var uiStateChange: Animation { .smooth(duration: 0.3) }
+}
+
+extension View {
+    /// Animates `value`'s changes with `Animation.uiStateChange` — or, under
+    /// Reduce Motion, a quick plain cross-fade instead of the spring, since
+    /// Reduce Motion asks for less movement, not silence.
+    func consistentAnimation(_ value: some Equatable) -> some View {
+        modifier(ConsistentAnimation(value: value))
+    }
+}
+
+private struct ConsistentAnimation<Value: Equatable>: ViewModifier {
+    let value: Value
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? .linear(duration: 0.12) : .uiStateChange, value: value)
+    }
+}
+
 /// The shared shell every auxiliary window (Rename Files, Collect into
 /// Folders, Find Duplicates, Check Album Completeness, Apply Found Matches)
 /// was independently reimplementing: a header (an optional title, a

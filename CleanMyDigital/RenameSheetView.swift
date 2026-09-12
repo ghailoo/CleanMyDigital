@@ -27,18 +27,20 @@ struct RenameSheetView: View {
         .onAppear { rebuildPlan() }
     }
 
-    @ViewBuilder
     private var content: some View {
-        if proposals.isEmpty {
-            ContentUnavailableView {
-                Label("Nothing to Rename", systemImage: "checkmark.circle")
-            } description: {
-                Text("Every file either already matches the naming convention, or is missing an Artist or Title tag.")
+        Group {
+            if proposals.isEmpty {
+                ContentUnavailableView {
+                    Label("Nothing to Rename", systemImage: "checkmark.circle")
+                } description: {
+                    Text("Every file either already matches the naming convention, or is missing an Artist or Title tag.")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                table
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            table
         }
+        .consistentAnimation(proposals.isEmpty)
     }
 
     private var table: some View {
@@ -92,7 +94,7 @@ struct RenameSheetView: View {
         .padding()
         // Appears once a rename/undo batch finishes — a fade reads as
         // "done", an instant pop reads as a layout glitch.
-        .animation(.easeOut(duration: 0.2), value: lastRunSummary)
+        .consistentAnimation(lastRunSummary)
     }
 
     private func selectionBinding(for id: URL) -> Binding<Bool> {
