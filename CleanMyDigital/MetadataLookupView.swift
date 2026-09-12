@@ -70,11 +70,24 @@ private struct ApplyToFileSection: View {
         return false
     }
 
+    /// Names whichever blocker is actually in effect, same pattern as
+    /// `ContentView.findAllMetadataHelp` — a disabled button that only
+    /// described its own action left a tester staring at a greyed-out
+    /// "Apply to File" with no way to tell why.
+    private var applyHelp: String {
+        if isApplied { return "Already applied to this file" }
+        if isApplying { return "Applying…" }
+        if !canWriteFormat { return "This format can't be written yet" }
+        if fillable.isEmpty { return "Nothing to fill — every fillable field already has a value" }
+        return "Write this match's fields to the file's tags"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Button("Apply to File") { Task { await apply() } }
                     .disabled(fillable.isEmpty || !canWriteFormat || isApplying || isApplied)
+                    .help(applyHelp)
                 if isApplying { ProgressView().controlSize(.small) }
             }
             if !canWriteFormat {
@@ -215,6 +228,9 @@ private struct DiscogsTabView: View {
             }
             Button("Search") { Task { await search() } }
                 .disabled(discogsToken.isEmpty)
+                .help(discogsToken.isEmpty
+                      ? "Add a Discogs personal access token in Settings to search"
+                      : "Search Discogs again using the terms above")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -519,8 +535,9 @@ private struct ComparisonView: View {
     private var actions: some View {
         HStack {
             Button("Copy as Text") { copyAsText() }
+                .help("Copy this match's fields, including which would be filled, to the clipboard")
             if let url = release.releasePageURL {
-                Link("Open on Discogs.com", destination: url)
+                Link("Open on Discogs.com", destination: url).help(url.absoluteString)
             }
             Spacer()
         }
@@ -689,6 +706,9 @@ private struct MusicBrainzTabView: View {
             }
             Button("Search") { Task { await search() } }
                 .disabled(musicBrainzContact.isEmpty)
+                .help(musicBrainzContact.isEmpty
+                      ? "Add a MusicBrainz contact email in Settings to search"
+                      : "Search MusicBrainz again using the terms above")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -906,8 +926,9 @@ private struct MusicBrainzComparisonView: View {
     private var actions: some View {
         HStack {
             Button("Copy as Text") { copyAsText() }
+                .help("Copy this match's fields, including which would be filled, to the clipboard")
             if let url = URL(string: "https://musicbrainz.org/recording/\(recording.id)") {
-                Link("Open on MusicBrainz.org", destination: url)
+                Link("Open on MusicBrainz.org", destination: url).help(url.absoluteString)
             }
             Spacer()
         }

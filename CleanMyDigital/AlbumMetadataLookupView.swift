@@ -78,6 +78,9 @@ struct AlbumMetadataLookupView: View {
                 .onSubmit { Task { await search() } }
             Button("Search") { Task { await search() } }
                 .disabled(discogsToken.isEmpty)
+                .help(discogsToken.isEmpty
+                      ? "Add a Discogs personal access token in Settings to search"
+                      : "Search Discogs again using the terms above")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -366,6 +369,7 @@ private struct AlbumComparisonView: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
+        .help("Reassign this file to a different track from the release")
     }
 
     @ViewBuilder
@@ -375,6 +379,9 @@ private struct AlbumComparisonView: View {
                 Button("Apply to Album") { Task { await applyToAlbum() } }
                     .buttonStyle(.borderedProminent)
                     .disabled(isApplying)
+                    .help(isApplying
+                          ? "Already applying — wait for this run to finish"
+                          : "Writes each field this release would fill, per file, without overwriting anything already present")
                 if isApplying { ProgressView().controlSize(.small) }
             }
             if let applySummary {
@@ -410,7 +417,7 @@ private struct AlbumComparisonView: View {
     private var actions: some View {
         HStack {
             if let url = release.releasePageURL {
-                Link("Open on Discogs.com", destination: url)
+                Link("Open on Discogs.com", destination: url).help(url.absoluteString)
             }
             Spacer()
         }
