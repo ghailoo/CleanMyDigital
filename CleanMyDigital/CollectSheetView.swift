@@ -46,6 +46,7 @@ struct CollectSheetView: View {
             TableColumn("") { proposal in
                 Toggle("", isOn: selectionBinding(for: proposal.id))
                     .labelsHidden()
+                    .accessibilityLabel("Select \(proposal.file.fileName)")
             }
             .width(24)
 

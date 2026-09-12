@@ -64,10 +64,12 @@ struct DuplicatesSheetView: View {
                     .foregroundStyle(.green)
                     .frame(width: 20)
                     .help("Recommended to keep")
+                    .accessibilityLabel("Recommended to keep")
             } else {
                 Toggle("", isOn: selectionBinding(for: file.url))
                     .labelsHidden()
                     .frame(width: 20)
+                    .accessibilityLabel("Select \(file.fileName)")
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.fileName).lineLimit(1)

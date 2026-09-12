@@ -347,6 +347,11 @@ private struct DiscogsResultRow: View {
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        // The cover thumbnail carries no information the title/year/genre
+        // text beside it doesn't already say — combining into one element
+        // reads as "Title, year, genre, format, label" in one VoiceOver
+        // stop instead of an unlabelled image plus separate text fragments.
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -455,6 +460,7 @@ private struct ComparisonView: View {
                                 }
                                 if matchedTrack?.id == track.id {
                                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                        .accessibilityLabel("Currently matched")
                                 }
                             }
                             .padding(.horizontal, 8)
@@ -507,6 +513,7 @@ private struct ComparisonView: View {
             }
             Spacer()
         }
+        .accessibilityElement(children: .combine)
     }
 
     private var actions: some View {
@@ -528,8 +535,9 @@ private struct ComparisonView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .help("This would fill a flagged field")
+                    .accessibilityLabel("Would fill this field")
             } else {
-                Color.clear.frame(width: 16, height: 16)
+                Color.clear.frame(width: 16, height: 16).accessibilityHidden(true)
             }
         }
     }
@@ -552,6 +560,11 @@ private struct ComparisonView: View {
                 Text("Current").font(.caption2).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // The thumbnail (or its absence) carries the real finding
+            // here — same reasoning as ContentView's artwork column, whose
+            // placeholder is labelled rather than left decorative.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(file.artworkThumbnail != nil ? "Current artwork: present" : "Current artwork: none")
             VStack(alignment: .leading, spacing: 2) {
                 if let url = release.thumbURL ?? release.coverImageURL {
                     AsyncImage(url: url) { image in
@@ -567,12 +580,15 @@ private struct ComparisonView: View {
                 Text("Discogs").font(.caption2).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel((release.thumbURL ?? release.coverImageURL) != nil ? "Discogs artwork: present" : "Discogs artwork: none")
             if fillable.contains(.artwork) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .help("This would fill a flagged field")
+                    .accessibilityLabel("Would fill this field")
             } else {
-                Color.clear.frame(width: 16, height: 16)
+                Color.clear.frame(width: 16, height: 16).accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 10)
@@ -810,6 +826,7 @@ private struct MusicBrainzResultRow: View {
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -883,6 +900,7 @@ private struct MusicBrainzComparisonView: View {
             }
             Spacer()
         }
+        .accessibilityElement(children: .combine)
     }
 
     private var actions: some View {
@@ -904,8 +922,9 @@ private struct MusicBrainzComparisonView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .help("This would fill a flagged field")
+                    .accessibilityLabel("Would fill this field")
             } else {
-                Color.clear.frame(width: 16, height: 16)
+                Color.clear.frame(width: 16, height: 16).accessibilityHidden(true)
             }
         }
     }
@@ -928,6 +947,11 @@ private struct MusicBrainzComparisonView: View {
                 Text("Current").font(.caption2).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // The thumbnail (or its absence) carries the real finding
+            // here — same reasoning as ContentView's artwork column, whose
+            // placeholder is labelled rather than left decorative.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(file.artworkThumbnail != nil ? "Current artwork: present" : "Current artwork: none")
             VStack(alignment: .leading, spacing: 2) {
                 if recording.coverArtURL != nil {
                     CoverArtThumbnail(url: recording.coverArtURL, size: 40) { available in
@@ -939,12 +963,15 @@ private struct MusicBrainzComparisonView: View {
                 Text("MusicBrainz").font(.caption2).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(coverArtAvailable == true ? "MusicBrainz artwork: present" : "MusicBrainz artwork: none")
             if fillable.contains(.artwork) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .help("This would fill a flagged field")
+                    .accessibilityLabel("Would fill this field")
             } else {
-                Color.clear.frame(width: 16, height: 16)
+                Color.clear.frame(width: 16, height: 16).accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 10)

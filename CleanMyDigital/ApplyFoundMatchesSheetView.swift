@@ -203,6 +203,7 @@ struct ApplyFoundMatchesSheetView: View {
             HStack(alignment: .top, spacing: 8) {
                 Toggle("", isOn: sectionSelectionBinding(for: group))
                     .labelsHidden()
+                    .accessibilityLabel("Select all files in \(sectionTitle(for: group))")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(sectionTitle(for: group)).font(.subheadline.weight(.semibold))
                     Text(Self.sectionSubtitle(for: group))
@@ -326,6 +327,7 @@ struct ApplyFoundMatchesSheetView: View {
             HStack(alignment: .top, spacing: 10) {
                 Toggle("", isOn: selectionBinding(for: file.url))
                     .labelsHidden()
+                    .accessibilityLabel("Select \(file.fileName)")
 
                 if found != nil {
                     Button {
@@ -338,6 +340,7 @@ struct ApplyFoundMatchesSheetView: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 2)
+                    .accessibilityLabel(isExpanded ? "Collapse details" : "Expand details")
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -412,7 +415,12 @@ struct ApplyFoundMatchesSheetView: View {
     @ViewBuilder
     private func matchIdentity(candidate: LookupCandidate) -> some View {
         HStack(alignment: .top, spacing: 8) {
+            // Decorative — the title/year/genre text beside it says
+            // everything it would. Not combined into one element with the
+            // rest of the row because the Discogs link inside must stay
+            // independently focusable/activatable for VoiceOver.
             artworkThumbnail(for: candidate)
+                .accessibilityHidden(true)
             switch candidate {
             case .discogs(let release):
                 // Two lines, not three: title stays alone (the one thing
@@ -499,12 +507,14 @@ struct ApplyFoundMatchesSheetView: View {
                     Text("Fills").font(.caption.weight(.semibold))
                     Text(fillsText).font(.caption).lineLimit(1).help(fillsText)
                 }
+                .accessibilityElement(children: .combine)
             }
             if let keepsText {
                 HStack(spacing: 4) {
                     Text("Keeps").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Text(keepsText).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(keepsText)
                 }
+                .accessibilityElement(children: .combine)
             }
             if Self.matchLooksLikelyWrong(comparisons) {
                 Label(Self.likelyWrongText, systemImage: "exclamationmark.triangle.fill")
@@ -672,12 +682,15 @@ struct ApplyFoundMatchesSheetView: View {
             Text(caption).font(.caption2).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(caption): \(isEmpty ? "no artwork" : "artwork present")")
     }
 
     private func outcomeIndicator(_ outcome: MatchComparison.Outcome) -> some View {
         Image(systemName: outcomeSymbol(outcome))
             .foregroundStyle(outcomeColor(outcome))
             .help(outcomeWord(outcome))
+            .accessibilityLabel(outcomeWord(outcome))
     }
 
     private func outcomeSymbol(_ outcome: MatchComparison.Outcome) -> String {

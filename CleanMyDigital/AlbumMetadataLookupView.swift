@@ -177,6 +177,10 @@ private struct AlbumDiscogsResultRow: View {
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        // The cover thumbnail adds nothing the title/year/genre text
+        // beside it doesn't already say — one combined VoiceOver stop
+        // beats an unlabelled image plus separate text fragments.
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -283,6 +287,7 @@ private struct AlbumComparisonView: View {
             }
             Spacer()
         }
+        .accessibilityElement(children: .combine)
     }
 
     private func sharedFieldRow(_ field: MetadataField, value: String?) -> some View {
@@ -299,7 +304,7 @@ private struct AlbumComparisonView: View {
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.green)
             } else {
-                Color.clear.frame(width: 16, height: 16)
+                Color.clear.frame(width: 16, height: 16).accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 10)
@@ -345,6 +350,7 @@ private struct AlbumComparisonView: View {
                 }
                 Spacer()
                 Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
                 if let matched {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(matched.title).lineLimit(1)

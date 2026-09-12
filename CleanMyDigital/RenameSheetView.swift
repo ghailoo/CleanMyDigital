@@ -46,6 +46,7 @@ struct RenameSheetView: View {
             TableColumn("") { proposal in
                 Toggle("", isOn: selectionBinding(for: proposal.id))
                     .labelsHidden()
+                    .accessibilityLabel("Select \(proposal.currentName)")
             }
             .width(24)
 
