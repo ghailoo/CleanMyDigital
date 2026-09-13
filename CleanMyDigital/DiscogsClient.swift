@@ -493,7 +493,10 @@ enum DiscogsClient {
                 queryItems.append(URLQueryItem(name: "release_title", value: album))
             }
         } else {
-            queryItems.append(URLQueryItem(name: "q", value: track))
+            // Artist and track both blank (e.g. a compilation looked up by
+            // album alone): an empty `q` makes Discogs return arbitrary
+            // releases, so search the album title instead.
+            queryItems.append(URLQueryItem(name: "q", value: track.isEmpty ? album : track))
         }
         components.queryItems = queryItems
         return components.url

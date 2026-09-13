@@ -33,6 +33,13 @@ struct DiscogsClientSearchTests {
         #expect(!query.contains { $0.name == "release_title" })
     }
 
+    @Test func searchesAlbumAsQWhenArtistAndTrackAreEmpty() throws {
+        let url = try #require(DiscogsClient.searchURL(artist: "", track: "", album: "Hotel Costes 10"))
+        let query = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+
+        #expect(query.contains(URLQueryItem(name: "q", value: "Hotel Costes 10")))
+    }
+
     // MARK: - shouldAttemptArtistOnlyFallback (search's third retry tier)
 
     @Test func attemptsArtistOnlyFallbackWhenAllowedWithBothArtistAndTrack() {
