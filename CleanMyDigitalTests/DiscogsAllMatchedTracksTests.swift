@@ -18,6 +18,12 @@ import Foundation
 /// decoding a minimal JSON payload shaped like Discogs' real
 /// `/releases/{id}` response, the same way the app itself constructs one.
 struct DiscogsAllMatchedTracksTests {
+    @Test func autoMatchIgnoresPunctuationDifferences() throws {
+        let detail = try Self.makeDetail(trackTitles: ["Intro", "Ain't Talkin' 'Bout Dub"])
+
+        #expect(detail.autoMatchedTrack(for: "Apollo Four Forty - Ain't Talkin' Bout Dub")?.title == "Ain't Talkin' 'Bout Dub")
+    }
+
     @Test func creditsACompoundFilenameForBothConcatenatedTracks() throws {
         let detail = try Self.makeDetail(trackTitles: ["Intro", "Mistério", "Interlude", "Outro"])
 

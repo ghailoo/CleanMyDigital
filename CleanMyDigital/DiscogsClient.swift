@@ -215,9 +215,12 @@ struct DiscogsReleaseDetail: Decodable, Sendable {
     /// marking an album complete when it isn't.
     private static let minimumSupplementaryMatchLength = 5
 
+    /// Case-, diacritic- and punctuation-insensitive, whitespace collapsed —
+    /// so "Ain't Talkin' 'Bout Dub" matches "Ain't Talkin' Bout Dub".
     private static func normalize(_ string: String) -> String {
-        string.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let folded = string.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        let kept = folded.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+        return String(kept).split(separator: " ").joined(separator: " ")
     }
 }
 
@@ -336,55 +339,43 @@ enum DiscogsClient {
         allowArtistOnlyFallback && !artist.isEmpty && !track.isEmpty
     }
 
-    /// The result of a compilation-aware Discogs search — the same
-    /// releases `search` would return, plus whether they came from
-    /// retrying without the track term (`searchCompilation`'s own final
-    /// tier). A result found that way confirms the *release*, not that
-    /// specific track — Discogs release search has no per-track data at
-    /// all (see `DiscogsRelease.fillableFields`'s doc comment), so this
-    /// isn't a downgrade in what it can fill, but a caller showing these
-    /// to a human should still say so, rather than let it read as a
-    /// confirmed exact-track hit.
-    struct CompilationSearchResult: Sendable {
-        let releases: [DiscogsRelease]
-        let usedBroaderTrackFallback: Bool
-    }
-
-    /// Searches for a compilation release. Runs `search`'s own tiered
-    /// retry for the track term itself (full, then a "(Mix)"-style
-    /// parenthetical stripped) with `allowArtistOnlyFallback: false` —
-    /// "Various" alone is meaningless as a Discogs search, so that
-    /// existing third tier would just waste a request. If both of those
-    /// still come back empty and `album` (release_title) is non-empty,
-    /// retries once more with the track term dropped entirely.
+    /// Searches for a compilation by its release title alone (free-text
+    /// `q=`, via `searchAlbum`) — never with the track term, which only
+    /// ever shadowed releases Discogs finds by title (the "Ice MC — It's A
+    /// Rainy Day" / "Maxi Power Best Of 94" case), and never with
+    /// artist "Various", which misses series Discogs credits to a compiler
+    /// instead ("Hôtel Costes 10"). The track is confirmed afterwards
+    /// against the picked release's tracklist instead — by the user in the
+    /// lookup sheet, or by `firstRelease(containingTrack:in:token:)` in the
+    /// batch lookup.
     ///
-    /// That final retry is narrower, and therefore safer to always
-    /// attempt (independent of whatever review process the caller has),
-    /// than the general artist-only fallback `search` itself gates behind
-    /// `allowArtistOnlyFallback`: it still requires `album` to match a
-    /// specific release title, so it can't balloon into "any release
-    /// credited to Various" the way dropping `album` too would. Verified
-    /// against the live API: a compilation track term can shadow a
-    /// release Discogs would otherwise find without it (a real case:
-    /// "Ice MC — It's A Rainy Day" against "Maxi Power Best Of 94" —
-    /// `release_title` alone already finds it, but an earlier, overly
-    /// broad version of this app's own compilation handling was tuned
-    /// off a *different* probe where adding the track term happened to
-    /// return zero results — see `DiscogsQuery`'s doc comment).
+    /// A user-typed artist is still honored (`artist=`+`release_title=`).
+    /// With no album term at all, falls back to a per-track search.
     static func searchCompilation(
         artist: String, track: String, album: String, token: String
-    ) async throws -> CompilationSearchResult {
-        let releases = try await search(
-            artist: artist, track: track, album: album, token: token, allowArtistOnlyFallback: false)
-        if !releases.isEmpty {
-            return CompilationSearchResult(releases: releases, usedBroaderTrackFallback: false)
+    ) async throws -> [DiscogsRelease] {
+        guard !album.isEmpty else {
+            return try await searchTrack(
+                artist: artist, track: track, token: token, allowArtistOnlyFallback: false
+            ).releases
         }
+        return try await searchAlbum(artist: artist, album: album, token: token)
+    }
 
-        guard !track.isEmpty, !album.isEmpty else {
-            return CompilationSearchResult(releases: [], usedBroaderTrackFallback: false)
+    /// The first of the top `limit` releases whose tracklist contains
+    /// `track` — how the no-review batch lookup confirms a compilation
+    /// match, since a title-only search can't tell volumes or pressings
+    /// apart. Release details are cached, so every file from the same
+    /// compilation shares one detail fetch per release.
+    /// ponytail: stops at `limit` releases; raise it if long series miss.
+    static func firstRelease(
+        containingTrack track: String, in releases: [DiscogsRelease], token: String, limit: Int = 5
+    ) async -> DiscogsRelease? {
+        for release in releases.prefix(limit) {
+            guard let detail = try? await releaseDetail(id: release.id, token: token) else { continue }
+            if detail.autoMatchedTrack(for: track) != nil { return release }
         }
-        let broaderReleases = try await performSearch(artist: artist, track: "", album: album, token: token)
-        return CompilationSearchResult(releases: broaderReleases, usedBroaderTrackFallback: !broaderReleases.isEmpty)
+        return nil
     }
 
     /// The result of a per-file (non-compilation) `searchTrack` search — the
@@ -470,14 +461,9 @@ enum DiscogsClient {
     /// lookup — factored out from `performSearch` so the request shape can
     /// be verified without hitting the network.
     ///
-    /// A non-empty `artist` with an empty `track` (`DiscogsQuery`'s
-    /// `.compilations` shape: artist "Various", no track) is handled
-    /// correctly here — `track` is only appended when non-empty, so the
-    /// request comes out as artist(+release_title) alone, never an empty
-    /// "track" param. The `else` branch's free-text `q` fallback is only
-    /// reachable when `artist` itself is empty, which `.compilations`
-    /// never produces (it's hardcoded to "Various"), so that branch can't
-    /// end up sending an empty query for this shape either.
+    /// `track` is only appended when non-empty, so an artist-only request
+    /// never sends an empty "track" param. With no artist, `q` is the track,
+    /// or the album when the track is blank too.
     static func searchURL(artist: String, track: String, album: String) -> URL? {
         var components = URLComponents(string: "https://api.discogs.com/database/search")!
         var queryItems = [
@@ -613,31 +599,15 @@ struct DiscogsQuery {
     /// see `MetadataQuery.albumSearchTerm(for:)`.
     let album: String
 
-    /// Compilations get a structurally different seeding than Singles/
-    /// Albums: Discogs credits a compilation release to "Various", never
-    /// to any one track's artist. Verified against the live API with a
-    /// real compilation (folder "DJ Hits '97/3", track "Apollo Four
-    /// Forty — Ain't Talkin' 'Bout Dub"): artist=the track's actual artist
-    /// (either credited name) plus track title → 0 results either way;
-    /// artist="Various" plus `release_title` (this file's Album tag) → 2
-    /// results, the correct release first. So for `.compilations`,
-    /// `artist` is hardcoded to "Various".
-    ///
-    /// `track` *is* still populated for `.compilations`, same as every
-    /// other category — an earlier version of this left it empty on the
-    /// theory that Discogs only finds a compilation by its release
-    /// identity, generalized from a single probe where adding a track term
-    /// happened to return zero results. That was wrong: verified against a
-    /// second real compilation ("Maxi Power Best Of 94", track "Ice MC —
-    /// It's A Rainy Day") that `release_title` + `track` finds the correct
-    /// release exactly as well as `release_title` alone, and the track
-    /// term is also information the user needs to judge the search, not
-    /// just a filter. `DiscogsClient.searchCompilation` is what actually
-    /// sends this — it retries once without the track term on zero
-    /// results, since it *can* still shadow a release in some cases.
+    /// Compilations leave `artist` blank: Discogs credits a compilation to
+    /// "Various" or to its compiler, never to one track's artist, so the
+    /// release is searched by `album` alone (`DiscogsClient.searchCompilation`)
+    /// and `track` is matched against its tracklist afterwards. `track` is
+    /// still populated — it's what that tracklist match uses, and what the
+    /// user needs to see to judge the result.
     init(for file: AudioFile) {
         if file.category == .compilations {
-            artist = "Various"
+            artist = ""
             track = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
         } else {
             let derivedArtist = MetadataQuery.artist(for: file)
@@ -655,12 +625,11 @@ struct DiscogsAlbumQuery {
     let artist: String
     let album: String
 
-    /// Same "Various" rule as `DiscogsQuery` for `.compilations` — see its
-    /// doc comment. `group.artist` (derived from `expectedArtist`, i.e.
-    /// the folder name) is never a real artist for a compilation release,
-    /// so it's never sent to Discogs as one.
+    /// Same blank-artist rule as `DiscogsQuery` for `.compilations` — see its
+    /// doc comment. `group.artist` (the folder name) is never a real artist
+    /// for a compilation, so the release is searched by title alone.
     init(for group: AlbumGroup) {
-        artist = group.category == .compilations ? "Various" : (group.artist ?? "")
+        artist = group.category == .compilations ? "" : (group.artist ?? "")
         album = MetadataQuery.strippingDiscAnnotation(from: group.albumTitle ?? group.folderURL.lastPathComponent)
     }
 }

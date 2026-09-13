@@ -93,19 +93,9 @@ struct DiscogsClientSearchTests {
 
     // MARK: - DiscogsQuery per-category seeding
 
-    /// The real case that motivated the "Various" artist rule: Discogs
-    /// credits a compilation release to "Various", never to any one
-    /// track's artist — searching "Apollo Four Forty" (or Discogs' own
-    /// canonical "Apollo 440") plus the track title returns nothing, but
-    /// "Various" plus the release title (this file's Album tag) finds the
-    /// actual release.
-    ///
-    /// `track` *is* populated here, unlike an earlier version of this rule
-    /// — leaving it empty was itself an over-correction from a single
-    /// probe that doesn't generalize (see `DiscogsQuery`'s doc comment);
-    /// `DiscogsClient.searchCompilation` is what actually falls back to
-    /// dropping it, only if a search with it comes back empty.
-    @Test func compilationsHardcodeArtistToVariousButStillPopulateTrack() {
+    /// Compilations are searched by release title alone, so `artist` stays
+    /// blank; `track` is still populated for the tracklist match afterwards.
+    @Test func compilationsLeaveArtistBlankButStillPopulateTrack() {
         let file = Self.makeFile(
             category: .compilations,
             fileName: "03 Apollo Four Forty - Ain't Talkin' Bout Dub.mp3",
@@ -114,7 +104,7 @@ struct DiscogsClientSearchTests {
             album: "DJ Hits '97-1")
 
         let query = DiscogsQuery(for: file)
-        #expect(query.artist == "Various")
+        #expect(query.artist.isEmpty)
         // Compilations skip the Singles-only " - " split (see
         // `cleanedTrackTitle`'s doc comment), so the dash-joined filename
         // survives intact once the leading track number is stripped.
@@ -136,19 +126,16 @@ struct DiscogsClientSearchTests {
             album: "Maxi Power Best Of 94 (CD-1)")
 
         let query = DiscogsQuery(for: file)
-        #expect(query.artist == "Various")
+        #expect(query.artist.isEmpty)
         #expect(query.track == "It's A Rainy Day (Euro Club Mix)")
         #expect(query.album == "Maxi Power Best Of 94")
     }
 
-    /// Confirms the "Various" rule holds even when the file has no Artist
-    /// tag at all — `.compilations` never falls through to any per-track
-    /// derivation, unlike `MetadataQuery.artist(for:)`'s own `artist ?? ""`
-    /// fallback — while `track` is still populated from the filename alone.
-    @Test func compilationsUseVariousEvenWithNoArtistTag() {
+    /// Blank artist holds with no Artist tag too; `track` comes from the filename.
+    @Test func compilationsLeaveArtistBlankWithNoArtistTag() {
         let file = Self.makeFile(category: .compilations, artist: nil, expectedArtist: "DJ Hits '97-1", album: nil)
         let query = DiscogsQuery(for: file)
-        #expect(query.artist == "Various")
+        #expect(query.artist.isEmpty)
         #expect(query.track == "Changes")
     }
 
@@ -240,12 +227,11 @@ struct DiscogsClientSearchTests {
 
     // MARK: - DiscogsAlbumQuery per-category seeding
 
-    /// Same "Various" rule as `DiscogsQuery`, at the whole-folder level —
-    /// `AlbumMetadataLookupView`'s search field must not prefill with the
-    /// compilation's folder name as if it were an artist.
-    @Test func albumQueryUsesVariousForACompilationGroup() {
+    /// Same blank-artist rule as `DiscogsQuery`, at the whole-folder level —
+    /// the folder name must never be sent as if it were an artist.
+    @Test func albumQueryLeavesArtistBlankForACompilationGroup() {
         let group = Self.makeGroup(category: .compilations, artist: "DJ Hits '97-1", albumTitle: "DJ Hits '97-1")
-        #expect(DiscogsAlbumQuery(for: group).artist == "Various")
+        #expect(DiscogsAlbumQuery(for: group).artist.isEmpty)
     }
 
     @Test func albumQueryUsesTheGroupsArtistForAnAlbumGroup() {

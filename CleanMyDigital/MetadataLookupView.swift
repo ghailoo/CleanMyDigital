@@ -145,11 +145,6 @@ private struct DiscogsTabView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var results: [DiscogsRelease] = []
-    /// True when `results` came from `DiscogsClient.searchCompilation`'s
-    /// retry without the track term — that confirms the release, not this
-    /// specific track, so `resultsList` says so rather than let a pick
-    /// here read as a confirmed exact-track hit.
-    @State private var usedBroaderTrackFallback = false
     /// True when `results` came from `DiscogsClient.searchTrack`'s broader
     /// retry with no artist term at all — `resultsList` says so rather than
     /// let a pick here read as a confirmed artist+title match.
@@ -188,11 +183,10 @@ private struct DiscogsTabView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                // The Artist search field above reads "Various" for a
-                // compilation (see `DiscogsQuery`'s doc comment) — the
-                // track's own real artist would otherwise be invisible
-                // in this sheet, even though it's exactly what tells a
-                // user whether the right track is being searched for.
+                // The Artist search field above is blank for a compilation
+                // (see `DiscogsQuery`'s doc comment) — the track's own real
+                // artist would otherwise be invisible in this sheet, even
+                // though it's what tells a user the right track is searched.
                 if file.category == .compilations, let trackArtist = file.artist, !trackArtist.isEmpty {
                     Text("Track artist (tag): \(trackArtist)")
                         .font(.caption2)
@@ -273,14 +267,7 @@ private struct DiscogsTabView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
-                if usedBroaderTrackFallback {
-                    Label("No exact track match — these releases matched on artist/album only.",
-                          systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal)
-                        .padding(.top, 6)
-                } else if usedTitleOnlyFallback {
+                if usedTitleOnlyFallback {
                     Label("No match with the artist included — these releases matched on title only.",
                           systemImage: "info.circle")
                         .font(.caption)
@@ -311,10 +298,10 @@ private struct DiscogsTabView: View {
         let album = albumText.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             if file.category == .compilations {
-                let outcome = try await DiscogsClient.searchCompilation(
+                // Album title only; the track is matched against the picked
+                // release's tracklist in `ComparisonView.loadDetail`.
+                results = try await DiscogsClient.searchCompilation(
                     artist: artist, track: track, album: album, token: discogsToken)
-                results = outcome.releases
-                usedBroaderTrackFallback = outcome.usedBroaderTrackFallback
                 usedTitleOnlyFallback = false
             } else {
                 // `album` isn't sent here — see `DiscogsClient.searchTrack`'s
@@ -323,12 +310,10 @@ private struct DiscogsTabView: View {
                 let outcome = try await DiscogsClient.searchTrack(artist: artist, track: track, token: discogsToken)
                 results = outcome.releases
                 usedTitleOnlyFallback = outcome.usedBroaderTitleOnlyFallback
-                usedBroaderTrackFallback = false
             }
         } catch {
             errorMessage = error.localizedDescription
             results = []
-            usedBroaderTrackFallback = false
             usedTitleOnlyFallback = false
         }
     }

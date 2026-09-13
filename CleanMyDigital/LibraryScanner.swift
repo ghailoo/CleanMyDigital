@@ -937,26 +937,24 @@ final class LibraryScanner {
             // confidently applying the wrong release's data instead of just
             // finding nothing. See DiscogsClient.search's doc comment.
             //
-            // `album` has to be passed through for `.compilations` — there,
-            // `query.artist` is just "Various" (see `DiscogsQuery`'s doc
-            // comment), so `album`/`release_title` is doing most of the
-            // narrowing alongside the track term.
-            //
-            // Compilations go through `searchCompilation` instead of
-            // `searchTrack` — it retries once without the track term on
-            // zero results (narrower, and therefore still safe for this
-            // no-human-review path, unlike the general artist-only
-            // fallback `allowArtistOnlyFallback: false` is guarding
-            // against below) — see its own doc comment.
+            // Compilations are searched by album title alone, then the top
+            // releases are checked for this file's track in their tracklist
+            // (`DiscogsClient.firstRelease`) — a title-only search can't
+            // tell volumes apart, and nobody reviews this pick.
             //
             // Everything else goes through `searchTrack`, which sends a
             // free-text `q=` combining artist+track rather than Discogs'
             // much patchier `track=` param — see its doc comment.
             let releases: [DiscogsRelease]?
             if file.category == .compilations {
-                releases = try? await DiscogsClient.searchCompilation(
-                    artist: query.artist, track: query.track, album: query.album, token: discogsToken
-                ).releases
+                if let found = try? await DiscogsClient.searchCompilation(
+                    artist: query.artist, track: query.track, album: query.album, token: discogsToken) {
+                    let confirmed = await DiscogsClient.firstRelease(
+                        containingTrack: query.track, in: found, token: discogsToken)
+                    releases = confirmed.map { [$0] } ?? []
+                } else {
+                    releases = nil
+                }
             } else {
                 releases = try? await DiscogsClient.searchTrack(
                     artist: query.artist, track: query.track,
