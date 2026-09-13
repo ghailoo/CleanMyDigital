@@ -202,6 +202,10 @@ struct ApplyFoundMatchesSheetView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .padding(.leading, Self.fieldsIndent)
+        // The vertical `Divider` in `twoPaneRow` is greedy in height; outside
+        // the List nothing caps it, so without this the header row claimed
+        // half the window and pushed the List off-screen.
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// A left half and a right half of equal, responsive width around a
