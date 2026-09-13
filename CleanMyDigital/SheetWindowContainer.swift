@@ -89,21 +89,30 @@ struct SheetWindowContainer<Content: View, Footer: View>: View {
 }
 
 /// Named presets rather than each window inventing its own ideal size.
-/// `.standard` is the default every window should reach for; the only
-/// reason to reach for `.wide` is a genuine need for more room — a
-/// column-heavy table (`DuplicatesSheetView`) or tall per-row disclosures
-/// (`ApplyFoundMatchesSheetView`) — not an arbitrary tweak.
+/// `.standard` is the default every window should reach for; `.wide` is for
+/// a genuine need for more room — a column-heavy table
+/// (`DuplicatesSheetView`) — and `.extraWide` for a side-by-side layout that
+/// needs two full comparison columns at once (`ApplyFoundMatchesSheetView`)
+/// — not an arbitrary tweak.
 enum SheetWindowSize {
     case standard
     case wide
+    case extraWide
 
-    var minWidth: CGFloat { 640 }
+    var minWidth: CGFloat {
+        switch self {
+        case .extraWide: 860
+        case .standard, .wide: 640
+        }
+    }
+
     var minHeight: CGFloat { 440 }
 
     var idealWidth: CGFloat {
         switch self {
         case .standard: 760
         case .wide: 860
+        case .extraWide: 1040
         }
     }
 
@@ -111,6 +120,7 @@ enum SheetWindowSize {
         switch self {
         case .standard: 520
         case .wide: 600
+        case .extraWide: 640
         }
     }
 }

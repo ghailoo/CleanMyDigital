@@ -26,21 +26,24 @@ import SwiftUI
 ///   the right tool when the batch picked the wrong release for a whole
 ///   album/compilation, the common failure mode.
 ///
-/// The release/recording identity (title, year, genre, format, label,
-/// cover, provider link) is shown once per *section* for Albums/
-/// Compilations, not once per file — every file in that kind of folder
-/// genuinely found the same match, so repeating it per row would just
-/// crowd out the one thing that actually varies file to file: how each
-/// file's own tags compare to it. Singles are the opposite case: a Singles
-/// folder's files are unrelated releases by definition (see
-/// `FoundMatchGroup.albumGroup`'s doc comment), so each file shows its own
-/// match identity on its own row instead — see `fileRow`. Either way, the
-/// per-file comparison itself is a disclosure — collapsed by default (a
-/// batch can hold 30+ files, so a full field table per row is over 400
-/// lines before anyone expands anything) to one concrete line naming only
-/// the fields that will actually be written, expandable via a chevron on
-/// the file row to the full field-by-field table with real before/after
-/// values — see `collapsedSummary`.
+/// Every file gets a side-by-side "Current" / "After Apply" comparison
+/// (`comparisonPanes`) — the two panes are ONE row's two halves inside the
+/// same `List`, not two independently-scrolling views, so they can never
+/// drift apart while scrolling. Both panes always list the same fields in
+/// the same order (`AfterApplyPresentation.orderedComparisons`); the After
+/// Apply side renders each field's `AfterApplyPresentation` — never the raw
+/// match value directly — so a field only looks changed when it will
+/// actually be written. A file with nothing that will change collapses to
+/// one "No changes" line instead of repeating seven identical-looking
+/// fields (`AfterApplyPresentation.hasAnyChange`).
+///
+/// The matched release's own identity (title, year, genre, cover, Discogs
+/// link) is shown once per *section* for Albums/Compilations — every file
+/// in that kind of folder genuinely found the same match — or once per
+/// *file* for Singles, whose files are unrelated releases by definition
+/// (see `FoundMatchGroup.albumGroup`'s doc comment); either way it's
+/// anchored above the After Apply pane specifically (`twoPaneRow`), since
+/// that's where the new values come from.
 ///
 /// Discogs matches here never fill Title/Track Number — Discogs search
 /// results are release-level only (see `DiscogsRelease.fillableFields`'s
@@ -86,25 +89,6 @@ struct ApplyFoundMatchesSheetView: View {
     @State private var metadataLookupFile: AudioFile?
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
     @State private var albumLookupGroup: AlbumGroup?
-    /// Which files' full before/after comparison table is expanded — all
-    /// collapsed by default, since a batch can hold 30+ files and even one
-    /// concrete line per file (let alone a full field table) would be over
-    /// 400 lines before anyone expands anything at that scale. The
-    /// collapsed summary (see `collapsedSummary`) names exactly which
-    /// fields will actually be written, so it's still concrete, not just a
-    /// verdict — expanding is for the real before/after values, or when a
-    /// match looks like it might be the wrong release entirely.
-    ///
-    /// Rendered as an explicit chevron `Button` on the file row itself, not
-    /// a `DisclosureGroup` — a `DisclosureGroup`'s built-in triangle reads
-    /// as basically invisible next to a wide multi-line custom label inside
-    /// a `List` row, which made the whole affordance easy to miss entirely.
-    /// Same underlying per-file expand/collapse state and behavior either
-    /// way; only the visual affordance changed, to make it unmistakable —
-    /// and to sit beside the file's own name rather than beside whichever
-    /// comparison field happened to render first, which used to read as
-    /// controlling that one field instead of the whole file.
-    @State private var expandedFileURLs: Set<URL> = []
 
     /// Every scanned file with a `.found` batch-lookup outcome, in table
     /// order. Recomputed live, so a file drops off this list the moment
@@ -128,12 +112,12 @@ struct ApplyFoundMatchesSheetView: View {
         // No title — the window titlebar (`WindowGroup("Apply Found
         // Matches", ...)` in CleanMyDigitalApp.swift) already says it;
         // repeating it in the subtitle's headline was a pure duplicate.
-        // .wide — the per-file disclosure content is the tallest of any
-        // auxiliary window's.
+        // .extraWide — two full comparison columns side by side need more
+        // room than any other auxiliary window.
         SheetWindowContainer(
             subtitle: Self.headerSubtitle(groups: groups),
             windowID: "apply-found-matches",
-            size: .wide
+            size: .extraWide
         ) {
             content
         } footer: {
@@ -175,28 +159,69 @@ struct ApplyFoundMatchesSheetView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    ForEach(groups) { group in
-                        Section {
-                            ForEach(group.files) { file in
-                                // Albums/Compilations share one release, shown
-                                // once in the section header (`sectionHeader`)
-                                // — but Singles files are unrelated releases by
-                                // definition, so each file shows its own match
-                                // here instead. Exact inverse of
-                                // `sectionShowsSharedMatchIdentity`.
-                                fileRow(file, showsOwnMatchIdentity: !Self.sectionShowsSharedMatchIdentity(for: group))
+                VStack(spacing: 0) {
+                    columnHeaders
+                    Divider()
+                    List {
+                        ForEach(groups) { group in
+                            Section {
+                                ForEach(group.files) { file in
+                                    // Albums/Compilations share one release, shown
+                                    // once in the section header (`sectionHeader`)
+                                    // — but Singles files are unrelated releases by
+                                    // definition, so each file shows its own match
+                                    // here instead. Exact inverse of
+                                    // `sectionShowsSharedMatchIdentity`.
+                                    fileRow(file, showsOwnMatchIdentity: !Self.sectionShowsSharedMatchIdentity(for: group))
+                                }
+                            } header: {
+                                sectionHeader(group)
                             }
-                        } header: {
-                            sectionHeader(group)
                         }
                     }
+                    .listStyle(.inset)
                 }
-                .listStyle(.inset)
             }
         }
         .consistentAnimation(targets.isEmpty)
     }
+
+    /// Pinned above the `List` (not inside it), so it never scrolls away —
+    /// unlike a per-section/per-row header, one column header for the whole
+    /// window reads as "these two columns run the length of the list."
+    /// Uses the same `twoPaneRow`/leading-indent skeleton as every file's
+    /// comparison, so the pane split roughly lines up underneath it.
+    private var columnHeaders: some View {
+        twoPaneRow {
+            Text("Current")
+        } right: {
+            Text("After Apply")
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .padding(.leading, Self.fieldsIndent)
+    }
+
+    /// A left half and a right half of equal, responsive width around a
+    /// `Divider` — the one skeleton shared by the column headers, each
+    /// section's match-identity header, and every file's field comparison,
+    /// so their pane boundaries all line up without measuring anything.
+    private func twoPaneRow<Left: View, Right: View>(
+        @ViewBuilder _ left: () -> Left, @ViewBuilder right: () -> Right
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            left().frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
+            right().frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// How far the field-comparison area (and the column headers above it)
+    /// is indented — roughly under the checkbox on the row above, so values
+    /// read as belonging to that file rather than starting at the margin.
+    private static let fieldsIndent: CGFloat = 26
 
     // MARK: - Section header (folder identity + the shared match identity)
 
@@ -222,13 +247,19 @@ struct ApplyFoundMatchesSheetView: View {
                 }
             }
             // Every file in this folder found the same match — shown once
-            // here rather than repeated on every row below. Only true for
+            // here rather than repeated on every row below, anchored above
+            // the After Apply pane specifically (empty left half) since
+            // that's where the new values come from. Only true for
             // Albums/Compilations; `representativeMatch` returns nil for a
             // Singles folder, where each file's row shows its own match
             // instead (see `fileRow`).
             if let match = representativeMatch(for: group) {
-                matchIdentity(candidate: match.candidate)
-                    .padding(.leading, 26)
+                twoPaneRow {
+                    EmptyView()
+                } right: {
+                    matchIdentity(candidate: match.candidate)
+                }
+                .padding(.leading, Self.fieldsIndent)
             }
         }
         .padding(.bottom, 2)
@@ -303,7 +334,7 @@ struct ApplyFoundMatchesSheetView: View {
     /// This file's `.found` outcome, split into its three associated
     /// values — computed once per row rather than re-pattern-matching
     /// `scanner.lookupResults[file.url]` separately for the comparison
-    /// table, the disclosure summary, and the "Correct…" button.
+    /// panes and the "Correct…" button.
     private func found(for file: AudioFile) -> (provider: MetadataProvider, candidate: LookupCandidate, fillable: Set<MetadataField>)? {
         guard case .found(let provider, let candidate, let fillable) = scanner.lookupResults[file.url] else { return nil }
         return (provider, candidate, fillable)
@@ -313,37 +344,15 @@ struct ApplyFoundMatchesSheetView: View {
     /// nil`) — unlike Albums/Compilations, its files are unrelated releases
     /// by definition, so there's no shared identity in the section header
     /// above (see `representativeMatch`) and this file's own match is shown
-    /// right here instead.
-    ///
-    /// The expand/collapse chevron lives in the top `HStack`, alongside the
-    /// selection `Toggle` and filename — not indented in with the
-    /// comparison content below it, where it used to sit beside the first
-    /// field line and read as controlling that field rather than the whole
-    /// file. See `expandedFileURLs`'s doc comment for why it's a plain
-    /// `Button` with its own chevron rather than a `DisclosureGroup`.
+    /// right here instead, anchored above its own After Apply pane.
     private func fileRow(_ file: AudioFile, showsOwnMatchIdentity: Bool) -> some View {
         let found = found(for: file)
-        let isExpanded = expandedFileURLs.contains(file.url)
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 10) {
                 Toggle("", isOn: selectionBinding(for: file.url))
                     .labelsHidden()
                     .accessibilityLabel("Select \(file.fileName)")
-
-                if found != nil {
-                    Button {
-                        if isExpanded { expandedFileURLs.remove(file.url) } else { expandedFileURLs.insert(file.url) }
-                    } label: {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 10)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 2)
-                    .accessibilityLabel(isExpanded ? "Collapse details" : "Expand details")
-                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.fileName).font(.callout).lineLimit(1)
@@ -362,25 +371,29 @@ struct ApplyFoundMatchesSheetView: View {
 
             if let found {
                 if showsOwnMatchIdentity {
-                    matchIdentity(candidate: found.candidate)
-                        .padding(.leading, 26)
+                    twoPaneRow {
+                        EmptyView()
+                    } right: {
+                        matchIdentity(candidate: found.candidate)
+                    }
+                    .padding(.leading, Self.fieldsIndent)
                 }
 
                 let comparisons = MatchComparisonBuilder.comparisons(
                     file: file, candidate: found.candidate, fillable: found.fillable)
 
-                collapsedSummary(comparisons, providerLabel: found.provider.rawValue)
-                    .padding(.leading, 26)
-
-                if isExpanded {
-                    comparisonTable(comparisons, file: file, candidate: found.candidate, provider: found.provider)
-                        .padding(.leading, 26)
-                        .transition(.opacity)
+                if AfterApplyPresentation.hasAnyChange(comparisons) {
+                    comparisonPanes(comparisons, file: file, candidate: found.candidate, providerLabel: found.provider.rawValue)
+                        .padding(.leading, Self.fieldsIndent)
+                } else {
+                    Text(Self.noChangesText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, Self.fieldsIndent)
                 }
             }
         }
         .padding(.vertical, 3)
-        .consistentAnimation(isExpanded)
     }
 
     private func selectionBinding(for url: URL) -> Binding<Bool> {
@@ -414,8 +427,8 @@ struct ApplyFoundMatchesSheetView: View {
     /// the real thing. Shown once per section for Albums/Compilations
     /// (see `sectionHeader`), where every file genuinely shares it, or once
     /// per file for Singles (see `fileRow`), where it doesn't; this answers
-    /// "which record was found," while each file's own disclosure answers
-    /// "how does it compare to what's already here."
+    /// "which record was found," while each file's own comparison panes
+    /// answer "how does it compare to what's already here."
     @ViewBuilder
     private func matchIdentity(candidate: LookupCandidate) -> some View {
         HStack(alignment: .top, spacing: 8) {
@@ -471,94 +484,177 @@ struct ApplyFoundMatchesSheetView: View {
         }
     }
 
-    // MARK: - Comparison summary (collapsed) and table (expanded)
+    // MARK: - Comparison panes (Current | After Apply)
 
-    /// The collapsed state for a file — up to three lines, each naming real
-    /// values, never just field names or bare verdicts (an earlier version
-    /// of this view showed only field names and verdicts with no real
-    /// values anywhere, which is the complaint the field-by-field
-    /// comparison exists to fix):
-    ///
-    /// - **Fills** — fields that are empty on the file and have a value in
-    ///   the match (`.willFill`). There is no "before" for these — the
-    ///   current value is always nothing — so this shows only the incoming
-    ///   value, never an arrow from an empty left-hand side.
-    /// - **Keeps** — fields that already have a value on the file *and* a
-    ///   different one in the match (`.differsButKept`). This is the one
-    ///   outcome where both sides matter (nothing is written, but a human
-    ///   should see what disagreed), so it's the only line that shows both.
-    /// - A **risky-match** line when `matchLooksLikelyWrong` — the flag has
-    ///   to say in words why it's flagged, not just show a triangle next to
-    ///   text that reads identically to an unflagged row.
-    ///
-    /// Agreeing and no-data fields are left entirely for the expanded
-    /// table, where their real values are still shown — naming them here
-    /// too was what made a single file take five lines, which at 85 files
-    /// was over 400 lines of scrolling before anyone expanded anything.
-    /// When neither Fills nor Keeps has anything, a single "No changes"
-    /// line takes their place.
-    @ViewBuilder
-    private func collapsedSummary(_ comparisons: [MatchComparison], providerLabel: String) -> some View {
-        let fills = comparisons.filter { $0.outcome == .willFill }
-        let keeps = comparisons.filter { $0.outcome == .differsButKept }
-        let fillsText = Self.fillsLineText(fills)
-        let keepsText = Self.keepsLineText(keeps, providerLabel: providerLabel)
+    /// One file's full field-by-field comparison, as one row's two halves —
+    /// both panes iterate `AfterApplyPresentation.orderedComparisons` (the
+    /// same fields, same order), so a given line is always the same field
+    /// on both sides. Nothing here can drift vertically out of sync between
+    /// the two panes: a field whose After Apply cell needs a second line
+    /// (`.differsButKept`'s note) reserves that same line height on the
+    /// Current side too, blank rather than omitted — see `fieldLine`.
+    private func comparisonPanes(
+        _ comparisons: [MatchComparison], file: AudioFile, candidate: LookupCandidate, providerLabel: String
+    ) -> some View {
+        let ordered = AfterApplyPresentation.orderedComparisons(comparisons, category: file.category)
+        let presentations = ordered.map { AfterApplyPresentation.forField($0, providerLabel: providerLabel) }
 
-        VStack(alignment: .leading, spacing: 2) {
-            if let fillsText {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(.blue).font(.caption2)
-                    Text("Fills").font(.caption.weight(.semibold))
-                    Text(fillsText).font(.caption).lineLimit(1).help(fillsText)
+        return twoPaneRow {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(ordered.indices, id: \.self) { index in
+                    currentLine(comparison: ordered[index], presentation: presentations[index], file: file)
                 }
-                .accessibilityElement(children: .combine)
             }
-            if let keepsText {
-                HStack(spacing: 4) {
-                    Text("Keeps").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Text(keepsText).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(keepsText)
+        } right: {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(ordered.indices, id: \.self) { index in
+                    afterApplyLine(
+                        comparison: ordered[index], presentation: presentations[index], file: file,
+                        candidate: candidate, providerLabel: providerLabel)
                 }
-                .accessibilityElement(children: .combine)
-            }
-            if Self.matchLooksLikelyWrong(comparisons) {
-                Label(Self.likelyWrongText, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-            if fillsText == nil, keepsText == nil {
-                Text(Self.noChangesText).font(.caption).foregroundStyle(.secondary)
+                // The genuine red flag in this window: Artist AND Album
+                // both `.differsButKept` at once — see
+                // `matchLooksLikelyWrong`'s doc comment. Anchored under the
+                // After Apply pane, since it's a judgment about trusting
+                // this match, not about what's on the file today.
+                if Self.matchLooksLikelyWrong(comparisons) {
+                    Label(Self.likelyWrongText, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
             }
         }
     }
 
-    /// "Fills   Year 1997 · Genre Electronic, Garage House · Artwork ✓" —
-    /// the incoming value only, no arrow and no empty left-hand side, since
-    /// `.willFill` means the file's field is empty by definition (see
-    /// `MatchComparison.Outcome.willFill`'s doc comment). Artwork has no
-    /// meaningful "value" to print (its comparison values are just
-    /// presence markers — see `MatchComparisonBuilder.artworkComparison`),
-    /// so it gets a checkmark instead. `nil` when there's nothing to fill,
-    /// so the caller can tell "no line" apart from "line with no fields."
-    static func fillsLineText(_ fills: [MatchComparison]) -> String? {
-        guard !fills.isEmpty else { return nil }
-        return fills.map { comparison in
-            comparison.field == .artwork ? "Artwork ✓" : "\(comparison.field.rawValue) \(comparison.matchValue ?? "–")"
-        }.joined(separator: " · ")
+    private static let fieldLabelWidth: CGFloat = 78
+    private static let inlineArtworkSize: CGFloat = 18
+
+    /// One field's line — a fixed-width label plus whatever `primary`
+    /// renders, with an optional second line reserved at the exact same
+    /// height whether or not `secondLineText` is non-nil (an invisible
+    /// placeholder keeps the row's height identical either way), so the
+    /// Current and After Apply cells for one field always end at the same
+    /// vertical position regardless of which one actually has a note.
+    private func fieldLine<Content: View>(
+        label: String, hasSecondLine: Bool, secondLineText: String?, @ViewBuilder primary: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: Self.fieldLabelWidth, alignment: .leading)
+                primary()
+            }
+            if hasSecondLine {
+                Text(secondLineText ?? " ")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .opacity(secondLineText == nil ? 0 : 1)
+                    .padding(.leading, Self.fieldLabelWidth + 6)
+                    .help(secondLineText ?? "")
+            }
+        }
     }
 
-    /// "Artist "Byron Stingily" · Discogs says "Byron Stingily Featuring
-    /// Leee John"" — the only collapsed line with two sides, since
-    /// `.differsButKept` is the only outcome where both the file's current
-    /// value and the match's differ and neither is nothing (see
-    /// `MatchComparison.Outcome.differsButKept`'s doc comment). Several
-    /// differing fields join on each side in the same order, so "Artist …,
-    /// Album …" on the left lines up with "…, …" on the right. `nil` when
-    /// nothing differs, matching `fillsLineText`.
-    static func keepsLineText(_ keeps: [MatchComparison], providerLabel: String) -> String? {
-        guard !keeps.isEmpty else { return nil }
-        let current = keeps.map { "\($0.field.rawValue) \"\($0.currentValue ?? "")\"" }.joined(separator: ", ")
-        let matched = keeps.map { "\"\($0.matchValue ?? "")\"" }.joined(separator: ", ")
-        return "\(current) · \(providerLabel) says \(matched)"
+    /// The Current pane's own accessibility element is hidden — its value
+    /// is folded into the After Apply line's single merged label instead
+    /// (see `AfterApplyPresentation.accessibilityLabel`), so VoiceOver
+    /// reads one stop per field, not two.
+    private func currentLine(comparison: MatchComparison, presentation: AfterApplyPresentation, file: AudioFile) -> some View {
+        fieldLine(
+            label: comparison.field.rawValue, hasSecondLine: presentation.note != nil, secondLineText: nil
+        ) {
+            if comparison.field == .artwork {
+                miniCurrentArtwork(file)
+            } else {
+                Text(comparison.currentValue ?? "–")
+                    .font(.caption)
+                    .foregroundStyle(comparison.currentValue == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(comparison.currentValue ?? "–")
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func afterApplyLine(
+        comparison: MatchComparison, presentation: AfterApplyPresentation, file: AudioFile,
+        candidate: LookupCandidate, providerLabel: String
+    ) -> some View {
+        fieldLine(
+            label: comparison.field.rawValue, hasSecondLine: presentation.note != nil, secondLineText: presentation.note
+        ) {
+            HStack(spacing: 4) {
+                if comparison.field == .artwork {
+                    miniAfterApplyArtwork(file: file, candidate: candidate, presentation: presentation)
+                } else {
+                    Text(presentation.displayValue ?? "–")
+                        .font(.caption)
+                        .fontWeight(presentation.marker == .new ? .semibold : .regular)
+                        .foregroundStyle(presentation.displayValue == nil
+                                         ? AnyShapeStyle(.tertiary)
+                                         : (presentation.marker == .new ? AnyShapeStyle(.blue) : AnyShapeStyle(.primary)))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(presentation.displayValue ?? "–")
+                }
+                markerIcon(presentation.marker)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AfterApplyPresentation.accessibilityLabel(
+            field: comparison.field, comparison: comparison, presentation: presentation, providerLabel: providerLabel))
+    }
+
+    /// Never the only signal a field was added or confirmed — see
+    /// `AfterApplyPresentation.Marker`'s doc comment — so this is always
+    /// paired with a tint on the value itself (added) or nothing extra
+    /// (confirmed reads fine from the checkmark alone, same convention as
+    /// the rest of the app's found/agree badges) and, either way, with the
+    /// spoken label on `afterApplyLine`'s accessibility element.
+    @ViewBuilder
+    private func markerIcon(_ marker: AfterApplyPresentation.Marker) -> some View {
+        switch marker {
+        case .new:
+            Image(systemName: "arrow.down.circle.fill").font(.caption2).foregroundStyle(.blue)
+        case .confirmed:
+            Image(systemName: "checkmark.circle.fill").font(.caption2).foregroundStyle(.green)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func miniCurrentArtwork(_ file: AudioFile) -> some View {
+        if let thumbnail = file.artworkThumbnail {
+            Image(nsImage: thumbnail)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: Self.inlineArtworkSize, height: Self.inlineArtworkSize)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+        } else {
+            RoundedRectangle(cornerRadius: 3)
+                .strokeBorder(Color.secondary.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [2]))
+                .frame(width: Self.inlineArtworkSize, height: Self.inlineArtworkSize)
+        }
+    }
+
+    /// Artwork's After Apply cell doesn't go through `AfterApplyPresentation
+    /// .displayValue` (a presence marker, not a real image) — it shows the
+    /// incoming cover when it will fill, otherwise the file's own current
+    /// artwork unchanged, exactly mirroring what `applySelected()` will
+    /// actually leave the file with.
+    @ViewBuilder
+    private func miniAfterApplyArtwork(file: AudioFile, candidate: LookupCandidate, presentation: AfterApplyPresentation) -> some View {
+        if presentation.marker == .new {
+            artworkThumbnail(for: candidate, size: Self.inlineArtworkSize)
+        } else {
+            miniCurrentArtwork(file)
+        }
     }
 
     static let likelyWrongText = "Artist and Album both differ — check this release"
@@ -579,156 +675,6 @@ struct ApplyFoundMatchesSheetView: View {
         let artistDiffers = comparisons.first { $0.field == .artist }?.outcome == .differsButKept
         let albumDiffers = comparisons.first { $0.field == .album }?.outcome == .differsButKept
         return artistDiffers && albumDiffers
-    }
-
-    private func comparisonTable(
-        _ comparisons: [MatchComparison], file: AudioFile, candidate: LookupCandidate, provider: MetadataProvider
-    ) -> some View {
-        // Changed fields first (what someone opened this for), agreements
-        // after (confirmation, condensed), no-data fields last (context
-        // only — nothing to act on or compare).
-        let ordered = comparisons.sorted { lhs, rhs in
-            priority(lhs.outcome) < priority(rhs.outcome)
-        }
-        return VStack(spacing: 0) {
-            ForEach(ordered) { comparison in
-                if comparison.field == .artwork {
-                    artworkComparisonRow(comparison, file: file, candidate: candidate, providerLabel: provider.rawValue)
-                } else {
-                    MetadataComparisonRow(
-                        fieldLabel: comparison.field.rawValue, currentValue: comparison.currentValue,
-                        matchColumnLabel: provider.rawValue, matchValue: comparison.matchValue,
-                        matchPlaceholder: comparison.unavailableNote, isCondensed: comparison.outcome == .agrees
-                    ) {
-                        outcomeIndicator(comparison.outcome)
-                    }
-                }
-                if comparison.id != ordered.last?.id { Divider() }
-            }
-        }
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-        .padding(.top, 4)
-    }
-
-    private func priority(_ outcome: MatchComparison.Outcome) -> Int {
-        switch outcome {
-        case .willFill: 0
-        case .differsButKept: 1
-        case .agrees: 2
-        case .noMatchData: 3
-        }
-    }
-
-    /// Artwork can't go through `MetadataComparisonRow`'s plain-text
-    /// columns — it needs real thumbnails, not the presence placeholder
-    /// `MatchComparisonBuilder` uses internally for its outcome
-    /// classification — so this renders them directly from `file`/
-    /// `candidate` while still reusing `comparison.outcome` for the
-    /// trailing indicator. Each side always shows something — a real
-    /// thumbnail or an explicit "empty" placeholder — never a bare dash,
-    /// so it's never ambiguous which image (if either) is which.
-    private func artworkComparisonRow(
-        _ comparison: MatchComparison, file: AudioFile, candidate: LookupCandidate, providerLabel: String
-    ) -> some View {
-        let matchURL: URL? = switch candidate {
-        case .discogs(let release): release.coverImageURL ?? release.thumbURL
-        case .musicBrainz(let recording): recording.coverArtURL
-        }
-        return HStack(alignment: .top) {
-            Text(MetadataField.artwork.rawValue)
-                .font(.subheadline.weight(.medium))
-                .frame(width: 100, alignment: .leading)
-            artworkSlot(caption: "Current", isEmpty: file.artworkThumbnail == nil) {
-                if let thumbnail = file.artworkThumbnail {
-                    Image(nsImage: thumbnail).resizable().aspectRatio(contentMode: .fit)
-                }
-            }
-            artworkSlot(caption: providerLabel, isEmpty: matchURL == nil) {
-                if let matchURL {
-                    AsyncImage(url: matchURL) { image in
-                        image.resizable().aspectRatio(contentMode: .fit)
-                    } placeholder: {
-                        ProgressView().controlSize(.small)
-                    }
-                }
-            }
-            outcomeIndicator(comparison.outcome)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-    }
-
-    /// One labeled artwork slot — the image `content` builds when
-    /// `isEmpty` is false, or an explicit dashed "None" placeholder at the
-    /// same size when it's true, so an empty slot always reads as
-    /// "confirmed empty" rather than "loading" or "missing by accident."
-    /// `isEmpty` is passed explicitly rather than inferred from `content`,
-    /// since a `@ViewBuilder if/else` never actually produces `EmptyView`
-    /// itself — it produces `_ConditionalContent`, which can't be checked
-    /// against a concrete type this way.
-    private func artworkSlot<Content: View>(
-        caption: String, isEmpty: Bool, @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(Color.secondary.opacity(0.35),
-                                  style: StrokeStyle(lineWidth: 1, dash: isEmpty ? [3] : []))
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(isEmpty ? 0.05 : 0)))
-                if isEmpty {
-                    Text("None").font(.system(size: 8)).foregroundStyle(.tertiary)
-                } else {
-                    content()
-                }
-            }
-            .frame(width: 32, height: 32)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            Text(caption).font(.caption2).foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(caption): \(isEmpty ? "no artwork" : "artwork present")")
-    }
-
-    private func outcomeIndicator(_ outcome: MatchComparison.Outcome) -> some View {
-        Image(systemName: outcomeSymbol(outcome))
-            .foregroundStyle(outcomeColor(outcome))
-            .help(outcomeWord(outcome))
-            .accessibilityLabel(outcomeWord(outcome))
-    }
-
-    private func outcomeSymbol(_ outcome: MatchComparison.Outcome) -> String {
-        switch outcome {
-        case .willFill: "arrow.down.circle.fill"
-        case .agrees: "checkmark.circle.fill"
-        case .differsButKept: "exclamationmark.circle.fill"
-        case .noMatchData: "minus.circle"
-        }
-    }
-
-    /// `.differsButKept` deliberately does NOT get a warning colour —
-    /// nothing is written, so a field merely differing from the match is
-    /// the routine, harmless case every match can show; orange here read as
-    /// alarming for something that's actually inert. The one place this
-    /// window does flag genuine risk is `matchLooksLikelyWrong`'s red
-    /// triangle in `collapsedSummary`, derived from two fields disagreeing
-    /// at once rather than any single field's outcome.
-    private func outcomeColor(_ outcome: MatchComparison.Outcome) -> Color {
-        switch outcome {
-        case .willFill: .blue
-        case .agrees: .green
-        case .differsButKept: .secondary
-        case .noMatchData: .secondary
-        }
-    }
-
-    private func outcomeWord(_ outcome: MatchComparison.Outcome) -> String {
-        switch outcome {
-        case .willFill: "Will fill"
-        case .agrees: "Agrees"
-        case .differsButKept: "Differs, kept"
-        case .noMatchData: "No data"
-        }
     }
 
     @ViewBuilder

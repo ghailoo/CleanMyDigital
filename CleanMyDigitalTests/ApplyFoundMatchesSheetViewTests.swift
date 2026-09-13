@@ -8,10 +8,12 @@ import Foundation
 @testable import CleanMyDigital
 
 /// Verifies the pure logic behind `ApplyFoundMatchesSheetView`'s per-section
-/// match identity and per-comparison summary text — pulled out of the view
-/// as `static func`s specifically so they're testable without a live
-/// `LibraryScanner` or a rendered `List`, same pattern as
-/// `ContentView.fileMatches`.
+/// match identity, wording, and the "match looks wrong" warning flag —
+/// pulled out of the view as `static func`s specifically so they're
+/// testable without a live `LibraryScanner` or a rendered `List`, same
+/// pattern as `ContentView.fileMatches`. The side-by-side comparison panes'
+/// own per-field display logic lives in `AfterApplyPresentation`, tested in
+/// `AfterApplyPresentationTests`.
 struct ApplyFoundMatchesSheetViewTests {
     // MARK: - sectionShowsSharedMatchIdentity / headerSubtitle
     //
@@ -68,93 +70,6 @@ struct ApplyFoundMatchesSheetViewTests {
     @Test func sectionSubtitleForACompilationGroupSaysCompilationNotAlbum() {
         let group = Self.makeGroup(hasAlbumGroup: true, category: .compilations, fileCount: 13)
         #expect(ApplyFoundMatchesSheetView.sectionSubtitle(for: group).contains("compilation"))
-    }
-
-    // MARK: - fillsLineText: the incoming value only, never an empty "before"
-
-    /// The bug this replaces: the collapsed line named every changed field
-    /// but no *value* — "Will fill: Year, Genre, Artwork" — spending a
-    /// whole line saying nothing concrete for the common case where a
-    /// `.willFill` field's "before" is always empty by definition. This
-    /// confirms the fix: real incoming values, joined, no arrows.
-    @Test func fillsLineNamesFieldAndIncomingValueForEachWillFillField() {
-        let comparisons = [
-            Self.makeComparison(.year, current: nil, match: "1997", outcome: .willFill),
-            Self.makeComparison(.genre, current: nil, match: "Electronic, Garage House", outcome: .willFill),
-        ]
-        let text = ApplyFoundMatchesSheetView.fillsLineText(comparisons)
-        #expect(text == "Year 1997 · Genre Electronic, Garage House")
-    }
-
-    /// Artwork's comparison values are presence markers ("Present"), not
-    /// real display text — a checkmark reads better than "Artwork Present".
-    @Test func fillsLineShowsACheckmarkForArtworkRatherThanItsPresenceMarker() {
-        let comparisons = [Self.makeComparison(.artwork, current: nil, match: "Present", outcome: .willFill)]
-        #expect(ApplyFoundMatchesSheetView.fillsLineText(comparisons) == "Artwork ✓")
-    }
-
-    /// `nil`, not an empty string, so the view can tell "nothing to fill"
-    /// apart from "a line with no content" and fall through to "No changes".
-    @Test func fillsLineIsNilWhenNothingWillFill() {
-        #expect(ApplyFoundMatchesSheetView.fillsLineText([]) == nil)
-    }
-
-    // MARK: - keepsLineText: the one line where both sides matter
-
-    /// The canonical case: exactly one differing field, both sides shown,
-    /// the provider named once rather than repeating "Discogs" per field.
-    @Test func keepsLineShowsBothSidesForASingleDifferingField() {
-        let comparisons = [
-            Self.makeComparison(.artist, current: "Byron Stingily", match: "Byron Stingily Featuring Leee John", outcome: .differsButKept),
-        ]
-        let text = ApplyFoundMatchesSheetView.keepsLineText(comparisons, providerLabel: "Discogs")
-        #expect(text == "Artist \"Byron Stingily\" · Discogs says \"Byron Stingily Featuring Leee John\"")
-    }
-
-    /// Several differing fields join on each side in the same order, so the
-    /// two lists stay lined up — this isn't rare: Year and Genre commonly
-    /// differ together even when Artist/Album agree (the `matchLooksLikelyWrong`
-    /// flag is specifically about the Artist+Album combination, not this one).
-    @Test func keepsLineJoinsSeveralDifferingFieldsInOrderOnBothSides() {
-        let comparisons = [
-            Self.makeComparison(.year, current: "1996", match: "1997", outcome: .differsButKept),
-            Self.makeComparison(.genre, current: "House", match: "Garage House", outcome: .differsButKept),
-        ]
-        let text = ApplyFoundMatchesSheetView.keepsLineText(comparisons, providerLabel: "Discogs")
-        #expect(text == "Year \"1996\", Genre \"House\" · Discogs says \"1997\", \"Garage House\"")
-    }
-
-    @Test func keepsLineIsNilWhenNothingDiffers() {
-        #expect(ApplyFoundMatchesSheetView.keepsLineText([], providerLabel: "Discogs") == nil)
-    }
-
-    // MARK: - Combinations the collapsed state can actually show
-
-    /// A file that fills some fields and keeps a differing one shows both
-    /// lines — the two outcomes are rendered independently, not merged or
-    /// treated as mutually exclusive.
-    @Test func fillsAndKeepsCanBothBePresentAtOnce() {
-        let comparisons = [
-            Self.makeComparison(.year, current: nil, match: "1997", outcome: .willFill),
-            Self.makeComparison(.artist, current: "Byron Stingily", match: "Byron Stingily Featuring Leee John", outcome: .differsButKept),
-        ]
-        let fills = comparisons.filter { $0.outcome == .willFill }
-        let keeps = comparisons.filter { $0.outcome == .differsButKept }
-        #expect(ApplyFoundMatchesSheetView.fillsLineText(fills) == "Year 1997")
-        #expect(ApplyFoundMatchesSheetView.keepsLineText(keeps, providerLabel: "Discogs") != nil)
-    }
-
-    /// Only agreements/no-data: both lines are nil, which is exactly the
-    /// condition the view uses to fall back to the "No changes" line.
-    @Test func onlyAgreementsMeansNoFillsAndNoKeepsLines() {
-        let comparisons = [
-            Self.makeComparison(.artist, current: "Byron Stingily", match: "Byron Stingily", outcome: .agrees),
-            Self.makeComparison(.trackNumber, current: nil, match: nil, outcome: .noMatchData),
-        ]
-        let fills = comparisons.filter { $0.outcome == .willFill }
-        let keeps = comparisons.filter { $0.outcome == .differsButKept }
-        #expect(ApplyFoundMatchesSheetView.fillsLineText(fills) == nil)
-        #expect(ApplyFoundMatchesSheetView.keepsLineText(keeps, providerLabel: "Discogs") == nil)
     }
 
     // MARK: - footerStatusText: coherent while a selection is being consumed
