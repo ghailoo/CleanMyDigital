@@ -55,6 +55,26 @@ struct FLACTagWriterTests {
         #expect(await Self.stringValue(.commonIdentifierArtist, in: metadata) == "New Artist")
     }
 
+    @Test func replacesAlbumOnlyWhenExplicitlyAsked() async throws {
+        let flacURL = try Self.makeTestFLAC()
+        defer { try? FileManager.default.removeItem(at: flacURL) }
+
+        var firstWrite = TagChanges()
+        firstWrite.title = "Keep Me"
+        firstWrite.album = "Turn Da Music Up (CDM)"
+        try FLACTagWriter.write(firstWrite, to: flacURL)
+
+        var replace = TagChanges()
+        replace.title = "Should Never Appear"
+        replace.album = "Turn Da Music Up"
+        replace.replacesAlbum = true
+        try FLACTagWriter.write(replace, to: flacURL)
+
+        let metadata = try await Self.allMetadata(of: AVURLAsset(url: flacURL))
+        #expect(await Self.stringValue(.commonIdentifierAlbumName, in: metadata) == "Turn Da Music Up")
+        #expect(await Self.stringValue(.commonIdentifierTitle, in: metadata) == "Keep Me")
+    }
+
     @Test func addsAFrontCoverPictureBlock() async throws {
         let flacURL = try Self.makeTestFLAC()
         defer { try? FileManager.default.removeItem(at: flacURL) }

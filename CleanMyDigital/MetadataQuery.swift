@@ -197,6 +197,22 @@ enum MetadataQuery {
     /// Only ever changes the *search term* returned here — never the
     /// file's Album tag or its folder name, neither of which this function
     /// touches.
+    /// Strips trailing release-format markers someone typed into an Album
+    /// tag — "(CDM)", "[CDS]", "(Maxi-Single)", "(EP)", "(Promo)", "(12")",
+    /// iTunes-style " - Single" — since Discogs/MusicBrainz keep the format
+    /// separately, never in the title. Only format words: "(Remixes)" or
+    /// "(Deluxe Edition)" are real title parts and stay. Returns nil when
+    /// there's nothing to strip (or stripping would leave nothing).
+    static func strippingFormatSuffix(from album: String?) -> String? {
+        guard let album else { return nil }
+        let pattern = #"(?:\s*[\(\[]\s*(?:CDM|CDS|CD[\s-]*(?:Maxi|Single)(?:[\s-]*Single)?|Maxi(?:[\s-]*Single)?|Single|EP|Promo|Vinyl|\d{1,2}\s*(?:"|''|-?inch))\s*[\)\]]|\s+-\s+(?:Single|EP))\s*$"#
+        var result = album.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let range = result.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+            result = result.replacingCharacters(in: range, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result.isEmpty || result == album ? nil : result
+    }
+
     static func strippingDiscAnnotation(from term: String) -> String {
         let pattern = #"\s*[\(\[]\s*(?:CD|Disc|Disk)\s*-?\s*\d+\s*[\)\]]\s*$"#
         guard let range = term.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else {

@@ -127,7 +127,11 @@ enum MatchComparisonBuilder {
         if fillable.contains(field) {
             outcome = .willFill
         } else if let currentValue, let matchValue {
-            outcome = normalize(currentValue) == normalize(matchValue) ? .agrees : .differsButKept
+            // Album compares past format markers like "(CDM)" — Discogs never has them.
+            let comparable = { (value: String) in
+                field == .album ? (MetadataQuery.strippingFormatSuffix(from: value) ?? value) : value
+            }
+            outcome = normalize(comparable(currentValue)) == normalize(comparable(matchValue)) ? .agrees : .differsButKept
         } else {
             outcome = .noMatchData
         }

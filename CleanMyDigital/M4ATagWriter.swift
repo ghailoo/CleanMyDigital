@@ -69,7 +69,7 @@ enum M4ATagWriter {
         if let artist = changes.artist, !hasArtist {
             newItems.append(stringItem(.iTunesMetadataArtist, artist))
         }
-        if let album = changes.album, !hasAlbum {
+        if let album = changes.album, !hasAlbum || changes.replacesAlbum {
             newItems.append(stringItem(.iTunesMetadataAlbum, album))
         }
         if let year = changes.year, !hasYear {
@@ -112,7 +112,15 @@ enum M4ATagWriter {
             .appendingPathComponent(".cleanmydigital-\(UUID().uuidString)")
             .appendingPathExtension("m4a")
 
-        exportSession.metadata = existingItems + newItems
+        // Drop existing items for every identifier being written — they're
+        // blank (or a replaced Album) by construction — so the file never
+        // carries two, with readers picking the stale blank one first.
+        let writtenIdentifiers = Set(newItems.compactMap(\.identifier))
+        let keptItems = existingItems.filter { item in
+            guard let identifier = item.identifier else { return true }
+            return !writtenIdentifiers.contains(identifier)
+        }
+        exportSession.metadata = keptItems + newItems
 
         do {
             try await exportSession.export(to: tempURL, as: .m4a)

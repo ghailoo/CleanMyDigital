@@ -48,6 +48,9 @@ struct ApplyFoundMatchesSheetView: View {
 
     @AppStorage("discogsToken") private var discogsToken = ""
     @AppStorage("backupOriginalsBeforeWriting") private var backupOriginalsBeforeWriting = true
+    /// Opt-in: also rewrite an existing Album to drop "(CDM)"-style format
+    /// suffixes — the one deliberate exception to "only fill empty fields".
+    @AppStorage("removeAlbumFormatSuffixes") private var removeFormatSuffixes = false
 
     /// Mirrors `AlbumComparisonView.ApplyOutcome` — distinguishes a file
     /// that failed to write from one that had nothing left to write
@@ -346,8 +349,9 @@ struct ApplyFoundMatchesSheetView: View {
     /// it still reads as something to re-check.
     private func fileCard(_ file: AudioFile, showsOwnMatchIdentity: Bool) -> some View {
         let found = found(for: file)
-        let comparisons = found.map {
-            MatchComparisonBuilder.comparisons(file: file, candidate: $0.candidate, fillable: $0.fillable)
+        let comparisons: [MatchComparison] = found.map { found in
+            let built = MatchComparisonBuilder.comparisons(file: file, candidate: found.candidate, fillable: found.fillable)
+            return removeFormatSuffixes ? AfterApplyPresentation.applyingFormatSuffixRemoval(to: built) : built
         } ?? []
         let isSelected = selection.contains(file.url)
 
@@ -685,6 +689,10 @@ struct ApplyFoundMatchesSheetView: View {
                     .transition(.opacity)
             }
             Spacer()
+            Toggle("Remove format suffixes from Album", isOn: $removeFormatSuffixes)
+                .toggleStyle(.checkbox)
+                .help("Also rewrites existing Album tags to drop markers like \"(CDM)\", \"(EP)\" or \" - Single\". Each change shows in the list before you apply.")
+                .disabled(isApplying)
             if isApplying { ProgressView().controlSize(.small) }
             Button("Apply Selected Matches") { Task { await applySelected() } }
                 .buttonStyle(.borderedProminent)
@@ -751,7 +759,12 @@ struct ApplyFoundMatchesSheetView: View {
             guard case .found(_, let candidate, let fillable) = scanner.lookupResults[file.url] else { continue }
 
             do {
-                let changes = try await candidate.buildChanges(fillable: fillable, discogsToken: discogsToken)
+                var changes = try await candidate.buildChanges(fillable: fillable, discogsToken: discogsToken)
+                if removeFormatSuffixes, changes.album == nil,
+                   let cleaned = MetadataQuery.strippingFormatSuffix(from: file.album) {
+                    changes.album = cleaned
+                    changes.replacesAlbum = true
+                }
                 guard !changes.isEmpty else {
                     outcomesByURL[file.url] = .alreadyComplete
                     alreadyCompleteCount += 1

@@ -91,6 +91,24 @@ struct M4ATagWriterTests {
         #expect(await Self.stringValue(afterMetadata, .iTunesMetadataUserGenre) == "Electronic, Euro House")
     }
 
+    @Test func replacesAlbumWithExactlyOneAlbumItem() async throws {
+        let m4aURL = try await Self.makeTestM4A()
+        defer { try? FileManager.default.removeItem(at: m4aURL) }
+
+        var firstWrite = TagChanges()
+        firstWrite.album = "Dreams (Will Come Alive) (CDM)"
+        try await M4ATagWriter.write(firstWrite, to: m4aURL)
+
+        var replace = TagChanges()
+        replace.album = "Dreams (Will Come Alive)"
+        replace.replacesAlbum = true
+        try await M4ATagWriter.write(replace, to: m4aURL)
+
+        let metadata = try await AVURLAsset(url: m4aURL).load(.metadata)
+        #expect(AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: .iTunesMetadataAlbum).count == 1)
+        #expect(await Self.stringValue(metadata, .iTunesMetadataAlbum) == "Dreams (Will Come Alive)")
+    }
+
     @Test func throwsNoChangesWhenEveryFieldAlreadyHasARealValue() async throws {
         let m4aURL = try await Self.makeTestM4A()
         defer { try? FileManager.default.removeItem(at: m4aURL) }

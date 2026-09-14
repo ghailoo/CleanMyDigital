@@ -32,7 +32,8 @@ enum ID3TagBuilder {
         if let artist = changes.artist, isNew(.artist) {
             builder.artist(frame: ID3FrameWithStringContent(content: artist))
         }
-        if let album = changes.album, isNew(.album) {
+        // Re-setting the frame replaces the preserved one on the builder.
+        if let album = changes.album, isNew(.album) || changes.replacesAlbum {
             builder.album(frame: ID3FrameWithStringContent(content: album))
         }
         if let year = changes.year, isNew(.recordingYear),

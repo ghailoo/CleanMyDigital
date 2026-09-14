@@ -74,6 +74,13 @@ struct MatchComparisonBuilderTests {
     /// verdict: "Differs, kept" alone doesn't say the file holds "Maxi
     /// Power Best Of 94 (CD-2)" while the match holds "Maxi Power Best Of
     /// '94" — the whole point of a comparison is being able to read both.
+    @Test func albumAgreesPastAFormatSuffix() {
+        let file = Self.makeFile(album: "Turn Da Music Up (CDM)")
+        let release = Self.makeRelease(album: "Turn Da Music Up")
+        let comparisons = MatchComparisonBuilder.comparisons(file: file, candidate: .discogs(release), fillable: [])
+        #expect(comparisons.first { $0.field == .album }?.outcome == .agrees)
+    }
+
     @Test func differsButKeptCarriesBothRealValuesForDisplay() {
         let file = Self.makeFile(album: "Maxi Power Best Of 94 (CD-2)")
         let release = Self.makeRelease(album: "Maxi Power Best Of '94")

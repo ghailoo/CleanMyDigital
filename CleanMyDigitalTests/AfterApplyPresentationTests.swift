@@ -193,3 +193,36 @@ struct AfterApplyPresentationTests {
         MatchComparison(field: field, currentValue: current, matchValue: match, unavailableNote: nil, outcome: outcome)
     }
 }
+
+struct FormatSuffixRemovalTests {
+    @Test func stripsCommonFormatMarkers() {
+        #expect(MetadataQuery.strippingFormatSuffix(from: "Turn Da Music Up (CDM)") == "Turn Da Music Up")
+        #expect(MetadataQuery.strippingFormatSuffix(from: "Can't Help Myself [CDS]") == "Can't Help Myself")
+        #expect(MetadataQuery.strippingFormatSuffix(from: "Ride Like The Wind (Maxi-Single)") == "Ride Like The Wind")
+        #expect(MetadataQuery.strippingFormatSuffix(from: "Freed From Desire (12\") (Promo)") == "Freed From Desire")
+        #expect(MetadataQuery.strippingFormatSuffix(from: "Sweet Harmony - Single") == "Sweet Harmony")
+    }
+
+    @Test func leavesRealTitlePartsAlone() {
+        #expect(MetadataQuery.strippingFormatSuffix(from: "Turn Da Music Up (Remixes)") == nil)
+        #expect(MetadataQuery.strippingFormatSuffix(from: "Discovery (Deluxe Edition)") == nil)
+        #expect(MetadataQuery.strippingFormatSuffix(from: "EP") == nil)
+        #expect(MetadataQuery.strippingFormatSuffix(from: nil) == nil)
+    }
+
+    @Test func removalTurnsASuffixedAlbumIntoAWillFillOfTheCleanedTitle() {
+        let kept = MatchComparison(
+            field: .album, currentValue: "Turn Da Music Up (CDM)", matchValue: "Turn Da Music Up",
+            unavailableNote: nil, outcome: .agrees)
+        let result = AfterApplyPresentation.applyingFormatSuffixRemoval(to: [kept])
+        #expect(result.first?.outcome == .willFill)
+        #expect(result.first?.matchValue == "Turn Da Music Up")
+    }
+
+    @Test func removalLeavesAnAlbumWithoutASuffixUnchanged() {
+        let plain = MatchComparison(
+            field: .album, currentValue: "Turn Da Music Up", matchValue: "Turn Da Music Up",
+            unavailableNote: nil, outcome: .agrees)
+        #expect(AfterApplyPresentation.applyingFormatSuffixRemoval(to: [plain]) == [plain])
+    }
+}

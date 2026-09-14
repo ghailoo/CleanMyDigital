@@ -91,6 +91,21 @@ struct AfterApplyPresentation: Equatable {
             .compactMap { byField[$0] }
     }
 
+    /// With "Remove format suffixes" on, an existing Album that carries one
+    /// ("Turn Da Music Up (CDM)") becomes a `.willFill` of the cleaned title,
+    /// so the preview, the change count, and VoiceOver all present it as the
+    /// write it is. Leaves an Album that's already being filled untouched.
+    static func applyingFormatSuffixRemoval(to comparisons: [MatchComparison]) -> [MatchComparison] {
+        comparisons.map { comparison in
+            guard comparison.field == .album, comparison.outcome != .willFill,
+                  let cleaned = MetadataQuery.strippingFormatSuffix(from: comparison.currentValue)
+            else { return comparison }
+            return MatchComparison(
+                field: .album, currentValue: comparison.currentValue, matchValue: cleaned,
+                unavailableNote: nil, outcome: .willFill)
+        }
+    }
+
     /// A file's row collapses to a single "No changes" line when nothing
     /// will actually be written. `.differsButKept` and `.noMatchData`
     /// fields don't count as changes — the file's tags stay exactly as they

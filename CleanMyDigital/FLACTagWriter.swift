@@ -106,6 +106,9 @@ enum FLACTagWriter {
 
         addIfMissing("TITLE", changes.title)
         addIfMissing("ARTIST", changes.artist)
+        if changes.replacesAlbum, changes.album?.isEmpty == false {
+            comments.removeAll { $0.uppercased().hasPrefix("ALBUM=") }
+        }
         addIfMissing("ALBUM", changes.album)
         addIfMissing("DATE", changes.year)
         addIfMissing("GENRE", changes.genre)

@@ -17,6 +17,10 @@ struct TagChanges: Sendable {
     var genre: String?
     var trackNumber: String?
     var artworkJPEG: Data?
+    /// The one exception to "only fill empty fields": when true, `album`
+    /// replaces an existing Album value. Only set by the user's explicit
+    /// "Remove format suffixes" choice in Apply Found Matches.
+    var replacesAlbum = false
 
     var isEmpty: Bool {
         title == nil && artist == nil && album == nil && year == nil
