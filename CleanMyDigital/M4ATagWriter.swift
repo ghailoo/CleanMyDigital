@@ -34,9 +34,13 @@ enum M4ATagWriter {
         // any existing value at all.
         func hasExisting(_ identifier: AVMetadataIdentifier) async -> Bool {
             for item in AVMetadataItem.metadataItems(from: existingItems, filteredByIdentifier: identifier) {
-                if let string = try? await item.load(.stringValue),
-                   !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    return true
+                // A text item counts only if it holds real text — a blank one's
+                // raw bytes (e.g. a single space) are not a value. Checking
+                // `.dataValue` for text items too made blank Year/Genre atoms
+                // read as present, so they were never filled.
+                if let string = try? await item.load(.stringValue) {
+                    if !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+                    continue
                 }
                 if let data = try? await item.load(.dataValue), !data.isEmpty {
                     return true
