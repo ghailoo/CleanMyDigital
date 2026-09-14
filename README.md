@@ -5,6 +5,22 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.1
+
+- **Apply Found Matches, redesigned.** Each file is a card with a one-line
+  *Current → After Apply* comparison per field. Only what will actually be written
+  is highlighted.
+- **"Check release" warning** on any match whose Artist *and* Album both disagree
+  with your file — the most likely sign of a wrong release.
+- **Remove format suffixes from Album** (optional) — cleans markers like "(CDM)",
+  "(EP)" or " - Single" from existing Album tags. See Apply Found Matches below.
+- **Better compilation searches** — found by the compilation's title, then the track
+  is confirmed on the release's tracklist.
+- **Fix:** some .m4a files reported "nothing to write" even though Year or Genre was
+  empty. They're now filled correctly.
+
+---
+
 ## Before you start
 
 ### 1. Add a Discogs token (strongly recommended)
@@ -34,6 +50,9 @@ fields that are genuinely empty. If a file already says the Genre is "Rock" and
 Discogs says "Hard Rock," the file keeps "Rock." This is deliberate — it can't
 silently degrade your existing tagging. It also means an "Apply" button will be
 greyed out, or report "already complete," when nothing is actually missing.
+
+The one exception is a checkbox you have to turn on yourself: **Remove format
+suffixes from Album** in Apply Found Matches (see below).
 
 **2. Nothing persists between launches.** Every time you open the app you start
 from an empty state and pick a folder. Scan results, Discogs lookups, and
@@ -115,6 +134,12 @@ still take one folder at a time.
 Group each compilation in its own folder. No artist-folder check is performed,
 since the whole point is that the tracks are by different artists.
 
+Compilations are searched on Discogs by **the compilation's title** (the Album tag, or
+the folder name), not by "Various" or by the track. Find All Metadata then only
+accepts a release whose tracklist actually contains your track, so a different
+volume of the same series isn't picked by mistake. Some series are credited to
+their compiler rather than "Various" — searching by title finds those too.
+
 ---
 
 ## Supported formats
@@ -149,10 +174,7 @@ every flagged file. **This only searches; it writes nothing.** Watch the Lookup
 column fill in with "Found" or "No match."
 
 **Apply Found Matches…** (checkmark in a circle) — this is the one that actually
-writes. It opens a window showing what each file's match would change, field by
-field, and writes the Artist / Album / Year / Genre / Artwork fields the search
-found. Title and Track Number for Discogs matches still need the per-file
-tracklist step below.
+writes. See the next section.
 
 > Find All Metadata and Apply Found Matches are a pair. Searching alone changes
 > nothing on disk.
@@ -198,6 +220,49 @@ search terms by hand when the automatic ones guess wrong.
 
 ---
 
+## Apply Found Matches
+
+A review window for everything Find All Metadata found. Files are grouped by folder;
+each file is a card showing the release that was found and one line per field:
+
+```
+Field     Current                    After Apply
+Album     —                       →  Can't Help Myself (Remix)   ← highlighted: will be written
+Artist    2 Brothers On The 4th Floor   2 Brothers On The 4th Floor ✓   ← already agrees
+```
+
+- **Highlighted with an arrow** — this value will be written.
+- **Grey** — stays exactly as it is. A ✓ means the match agrees with your file.
+- **"Discogs: … — not applied"** — the match says something different, but your
+  existing value is kept (the never-overwrite rule).
+- **"3 changes"** badge — how many fields this file will get.
+- **"Check release"** (orange) — Artist and Album both disagree with the match.
+  Probably the wrong release: use **Correct…** before applying.
+
+Differences that are only a format marker don't count: an Album of
+"Turn Da Music Up (CDM)" agrees with Discogs' "Turn Da Music Up".
+
+**Correct…** re-searches one file. **Re-match Album… / Re-match Compilation…** (in
+the folder header) re-searches the whole folder at once — use it when every track
+got the same wrong release.
+
+Untick a file (or a whole folder) to leave it out; its card fades so you can see it
+won't be written. **Apply Selected Matches** writes the rest, one file at a time,
+with a backup first if that setting is on.
+
+### Remove format suffixes from Album (optional)
+
+A checkbox in the window's footer, **off by default**. When on, existing Album tags
+that end in a format marker — `(CDM)`, `[CDS]`, `(CD Single)`, `(Maxi-Single)`,
+`(EP)`, `(Single)`, `(Promo)`, `(Vinyl)`, `(12")`, or iTunes-style ` - Single` /
+` - EP` — are cleaned. Real title parts like "(Remixes)" or "(Deluxe Edition)" are
+left alone.
+
+Each cleanup shows up as a normal highlighted change *before* you apply, so you can
+check it. It only affects files listed in this window, and only the Album field.
+
+---
+
 ## Check Album Completeness (Albums only)
 
 This answers a different question from everything else: **does this folder contain
@@ -232,6 +297,10 @@ Useful things to tell us:
 - A file the app said was unreadable that plays fine elsewhere
 - A wrong Artist Mismatch flag, along with the folder path and the Artist tag
 - A Discogs search returning nothing when the release clearly exists
+- A "Check release" warning on a match that is actually correct (or no warning on
+  one that is clearly wrong)
+- A format suffix that should have been removed but wasn't, or a title that was
+  cleaned when it shouldn't have been
 - Any file that sounds different, won't play, or changes size after a write
 - Any error message that doesn't explain what to do next
 
