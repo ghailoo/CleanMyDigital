@@ -109,6 +109,27 @@ struct M4ATagWriterTests {
         #expect(await Self.stringValue(metadata, .iTunesMetadataAlbum) == "Dreams (Will Come Alive)")
     }
 
+    /// Year and Genre in an M4A must be visible to the scanner's lookup —
+    /// AVFoundation reports iTunes keys as numbers, so the name-based match
+    /// alone found neither (every M4A showed them as missing).
+    @Test func scannerLookupSeesM4AYearAndGenre() async throws {
+        let m4aURL = try await Self.makeTestM4A()
+        defer { try? FileManager.default.removeItem(at: m4aURL) }
+
+        var changes = TagChanges()
+        changes.year = "1991"
+        changes.genre = "Euro-House, Euro-Dance"
+        try await M4ATagWriter.write(changes, to: m4aURL)
+
+        let items = try await AVURLAsset(url: m4aURL).load(.metadata)
+        #expect(await LibraryScanner.stringValue(
+            in: items, identifiers: [.commonIdentifierCreationDate, .iTunesMetadataReleaseDate],
+            keys: ["TYER", "TDRC", "©day", "year", "YEAR"]) == "1991")
+        #expect(await LibraryScanner.stringValue(
+            in: items, identifiers: [.iTunesMetadataUserGenre],
+            keys: ["TCON", "©gen", "gnre", "genre", "GENRE"]) == "Euro-House, Euro-Dance")
+    }
+
     @Test func throwsNoChangesWhenEveryFieldAlreadyHasARealValue() async throws {
         let m4aURL = try await Self.makeTestM4A()
         defer { try? FileManager.default.removeItem(at: m4aURL) }

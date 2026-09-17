@@ -1194,24 +1194,24 @@ final class LibraryScanner {
                 duration: duration,
                 bitrateKbps: bitrateKbps,
                 title: mergedValue(
-                    avFoundation: await stringValue(in: items, common: .commonIdentifierTitle,
+                    avFoundation: await stringValue(in: items, identifiers: [.commonIdentifierTitle],
                                                      keys: ["TIT2", "TT2", "©nam", "title", "TITLE"]),
                     native: native?.title),
                 artist: mergedValue(
-                    avFoundation: await stringValue(in: items, common: .commonIdentifierArtist,
+                    avFoundation: await stringValue(in: items, identifiers: [.commonIdentifierArtist],
                                                      keys: ["TPE1", "TP1", "©ART", "artist", "ARTIST"]),
                     native: native?.artist),
                 album: mergedValue(
-                    avFoundation: await stringValue(in: items, common: .commonIdentifierAlbumName,
+                    avFoundation: await stringValue(in: items, identifiers: [.commonIdentifierAlbumName],
                                                      keys: ["TALB", "TAL", "©alb", "album", "ALBUM"]),
                     native: native?.album),
                 artworkThumbnail: artwork,
                 year: mergedValue(
-                    avFoundation: await stringValue(in: items, common: .commonIdentifierCreationDate,
+                    avFoundation: await stringValue(in: items, identifiers: [.commonIdentifierCreationDate, .iTunesMetadataReleaseDate],
                                                      keys: ["TYER", "TDRC", "©day", "year", "YEAR"]),
                     native: native?.year),
                 genre: mergedValue(
-                    avFoundation: await stringValue(in: items, common: nil,
+                    avFoundation: await stringValue(in: items, identifiers: [.iTunesMetadataUserGenre],
                                                      keys: ["TCON", "©gen", "gnre", "genre", "GENRE"]),
                     native: native?.genre),
                 trackNumber: mergedTrackNumber(
@@ -1270,14 +1270,19 @@ final class LibraryScanner {
         return mergedValue(avFoundation: avFoundation, native: native)
     }
 
-    nonisolated private static func stringValue(
+    /// `identifiers` must include the iTunes identifier for any field
+    /// `.commonMetadata` doesn't map: in .m4a files AVFoundation reports an
+    /// item's `.key` as a numeric FourCharCode, so the `keys` string match
+    /// never finds "©day"/"©gen" — Year and Genre were invisible for every
+    /// M4A, flagged missing, and then (correctly) refused by the writer.
+    nonisolated static func stringValue(
         in items: [AVMetadataItem],
-        common identifier: AVMetadataIdentifier?,
+        identifiers: [AVMetadataIdentifier],
         keys: [String]
     ) async -> String? {
-        var candidates = identifier.map {
+        var candidates = identifiers.flatMap {
             AVMetadataItem.metadataItems(from: items, filteredByIdentifier: $0)
-        } ?? []
+        }
         candidates += items.filter { item in
             guard let key = item.key else { return false }
             return keys.contains(String(describing: key))
@@ -1309,7 +1314,7 @@ final class LibraryScanner {
                 return decoded
             }
         }
-        return await stringValue(in: items, common: nil,
+        return await stringValue(in: items, identifiers: [],
                                   keys: ["TRCK", "trkn", "tracknumber", "TRACKNUMBER"])
     }
 
