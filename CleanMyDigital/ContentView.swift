@@ -398,22 +398,25 @@ struct ContentView: View {
             }
             Spacer()
             if scanner.isLookingUp {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Looking up \(scanner.lookupCompletedCount) of \(scanner.lookupTotalCount)…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                JobProgressPill(
+                    title: "Finding metadata",
+                    completed: scanner.lookupCompletedCount, total: scanner.lookupTotalCount,
+                    detail: pluralized(scanner.lookupResults.values.filter(\.isFound).count, "match") + " found",
+                    stopHelp: "Stop the batch lookup — matches found so far are kept"
+                ) { scanner.cancelLookup() }
+                .transition(.opacity)
             }
             if scanner.isAnalyzingSpectrum {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Analyzing \(scanner.spectralCompletedCount) of \(scanner.spectralTotalCount)…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                JobProgressPill(
+                    title: "Checking for transcodes",
+                    completed: scanner.spectralCompletedCount, total: scanner.spectralTotalCount,
+                    detail: nil,
+                    stopHelp: "Stop the spectral analysis — cutoffs measured so far are kept"
+                ) { scanner.cancelSpectrumAnalysis() }
+                .transition(.opacity)
             }
         }
+        .consistentAnimation(scanner.isLookingUp || scanner.isAnalyzingSpectrum)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
@@ -1094,3 +1097,47 @@ private struct CategoryPromptOption: View {
 #Preview {
     ContentView(scanner: LibraryScanner())
 }
+
+/// A running batch job's status: what it's doing, a determinate bar, "5 of 9",
+/// an optional live result count, and Stop right beside it — so progress and
+/// the way out sit together instead of Stop living back in the toolbar.
+private struct JobProgressPill: View {
+    let title: String
+    let completed: Int
+    let total: Int
+    let detail: String?
+    let stopHelp: String
+    let stop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(title).font(.caption.weight(.medium))
+                    Text("\(completed) of \(total)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    if let detail {
+                        Text("· \(detail)").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                ProgressView(value: Double(completed), total: Double(max(total, 1)))
+                    .progressViewStyle(.linear)
+                    .frame(width: 180)
+                    .animation(.smooth(duration: 0.3), value: completed)
+            }
+            // Label and bar read as one stop; Stop stays its own button.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title), \(completed) of \(total)\(detail.map { ", \($0)" } ?? "")")
+            Button("Stop", systemImage: "stop.circle.fill", action: stop)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help(stopHelp)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.quinary, in: Capsule())
+    }
+}
+
