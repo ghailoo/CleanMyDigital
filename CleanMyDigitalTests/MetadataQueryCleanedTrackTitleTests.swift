@@ -188,3 +188,44 @@ struct MetadataQueryCleanedTrackTitleTests {
         #expect(cleaned == title)
     }
 }
+
+struct FeaturedArtistStrippingTests {
+    @Test func dropsTheFeaturedCreditButKeepsTheMixName() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "02 - YBU - Soul Magic (funk vocal version) (feat. Jonell).flac",
+            artist: "YBU", category: .singles) == "Soul Magic (funk vocal version)")
+    }
+
+    @Test func handlesBracketsBareCreditsAndCase() {
+        #expect(MetadataQuery.strippingFeaturedArtist(from: "Soul Magic [Ft. Jonell]") == "Soul Magic")
+        #expect(MetadataQuery.strippingFeaturedArtist(from: "Soul Magic feat. Jonell (Funk Mix)") == "Soul Magic (Funk Mix)")
+        #expect(MetadataQuery.strippingFeaturedArtist(from: "Soul Magic Featuring Jonell") == "Soul Magic")
+    }
+
+    @Test func leavesTitlesWithoutACreditAlone() {
+        #expect(MetadataQuery.strippingFeaturedArtist(from: "The Feat Of Clay") == "The Feat Of Clay")
+        #expect(MetadataQuery.strippingFeaturedArtist(from: "Loft Party (Club Mix)") == "Loft Party (Club Mix)")
+    }
+}
+
+struct FileNameSeparatorTests {
+    @Test func splitsArtistAcrossNonBreakingSpacesAndDashVariants() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "Young MC\u{00A0}-\u{00A0}Principals Office  (12 Inch Version).mp3",
+            artist: "Young MC", category: .singles) == "Principals Office (12 Inch Version)")
+        #expect(MetadataQuery.artistParsedFromFileName("Young MC – Principals Office.mp3") == "Young MC")
+    }
+}
+
+struct SceneGroupTagTests {
+    @Test func dropsTheTrailingGroupTagFromALowercaseSceneName() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "02-x-dream - live fast-die young-gem.mp3",
+            artist: "X-Dream", category: .singles) == "live fast-die young")
+    }
+
+    @Test func leavesMixedCaseTitlesAlone() {
+        #expect(MetadataQuery.strippingSceneGroupTag(from: "Show Me What You Got (Remix) Jay-Z") == "Show Me What You Got (Remix) Jay-Z")
+        #expect(MetadataQuery.strippingSceneGroupTag(from: "Live Fast-Die Young") == "Live Fast-Die Young")
+    }
+}

@@ -62,8 +62,15 @@ enum MetadataQuery {
     /// same wrapped in parentheses — "(01) ") from a filename-derived
     /// title. Factored out of `cleanedTrackTitle` so `artistParsedFromFileName`
     /// starts from the same track-number-free text.
+    /// Also normalizes separators first — every filename parser starts here.
+    /// Non-breaking spaces ("Young MC\u{00A0}-\u{00A0}Principals Office") and
+    /// en/em dashes look identical to " - " but never matched it, so the
+    /// artist stayed glued to the title and searches found nothing.
     private static func strippingLeadingTrackNumber(from name: String) -> String {
         var name = name
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) // ICU \s includes NBSP
+            .replacingOccurrences(of: " – ", with: " - ")
+            .replacingOccurrences(of: " — ", with: " - ")
         if let range = name.range(of: #"^\s*\(?\d{1,3}[\s._\-)]+"#, options: .regularExpression) {
             name.removeSubrange(range)
         }
@@ -163,7 +170,38 @@ enum MetadataQuery {
         }
 
         name = name.replacingOccurrences(of: "_", with: " ")
-        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return strippingFeaturedArtist(from: strippingSceneGroupTag(from: name))
+    }
+
+    /// Drops a trailing scene release-group tag — "live fast-die young-gem"
+    /// → "live fast-die young". Only for all-lowercase names (how scene rips
+    /// are named), so a real title ending in "-Z" or "-Mix" is left alone.
+    /// ponytail: heuristic; a lowercase title really ending in "-abc" would lose it.
+    static func strippingSceneGroupTag(from title: String) -> String {
+        guard title == title.lowercased(),
+              let range = title.range(of: #"-[a-z0-9]{2,6}$"#, options: .regularExpression)
+        else { return title }
+        let stripped = title.replacingCharacters(in: range, with: "").trimmingCharacters(in: .whitespaces)
+        return stripped.isEmpty ? title : stripped
+    }
+
+    /// Drops a featured-artist credit — "(feat. Jonell)", "[ft. X]", or a bare
+    /// " featuring X" before any mix parenthetical. Discogs and MusicBrainz
+    /// credit featured artists separately, never in the track title, so
+    /// leaving it in turns a findable title into zero results. Mix names
+    /// like "(Funk Vocal Version)" are kept — they pin the pressing.
+    static func strippingFeaturedArtist(from title: String) -> String {
+        // Outside brackets the dot (or "featuring") is required, so a real
+        // title like "The Feat Of Clay" is left alone.
+        let bracketedCredit = #"(?:feat\.?|ft\.?|featuring)\s"#
+        let bareCredit = #"(?:feat\.|ft\.|featuring)\s"#
+        return title
+            .replacingOccurrences(of: #"\s*[\(\[]\s*"# + bracketedCredit + #"[^\)\]]*[\)\]]"#, with: "",
+                                  options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\s+"# + bareCredit + #"[^\(\[]*"#, with: " ",
+                                  options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Strips a single trailing parenthetical — "Pacific 0101 (Remix Edit)"
