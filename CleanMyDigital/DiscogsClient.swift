@@ -423,11 +423,11 @@ enum DiscogsClient {
     /// If the primary combined search returns zero results, retries once
     /// with just `track` (mix included) — dropping the artist rather than
     /// any part of the title, since the title is the strongest identifying
-    /// signal here, not a redundant artist prefix. Skipped when
-    /// `allowArtistOnlyFallback` is false: the automated, no-human-review
-    /// batch lookup (`LibraryScanner.lookupOutcome`) shouldn't trade "found
-    /// nothing" for "confidently applied a same-titled but wrong track's
-    /// release" — same reasoning as `search`'s own gating.
+    /// signal here, not a redundant artist prefix. When
+    /// `allowArtistOnlyFallback` is false (the no-review batch lookup), that
+    /// retry keeps only releases whose own artist matches
+    /// (`releaseArtist(of:matches:)`), so it never applies a same-titled but
+    /// wrong track's release.
     static func searchTrack(
         artist: String, track: String, token: String, allowArtistOnlyFallback: Bool = true
     ) async throws -> TrackSearchResult {
@@ -443,11 +443,39 @@ enum DiscogsClient {
             return TrackSearchResult(releases: results, usedBroaderTitleOnlyFallback: false)
         }
 
-        guard allowArtistOnlyFallback, !artist.isEmpty, !track.isEmpty else {
+        guard !artist.isEmpty, !track.isEmpty else {
             return TrackSearchResult(releases: [], usedBroaderTitleOnlyFallback: false)
         }
+        // A title-only result whose own artist is this artist is as good as a
+        // combined hit: listed first, and no "title only" warning. Without a
+        // human reviewing (batch lookup), only those are kept — never a
+        // same-titled track by someone else.
         let broaderResults = try await performSearch(artist: "", track: track, album: "", token: token)
-        return TrackSearchResult(releases: broaderResults, usedBroaderTitleOnlyFallback: !broaderResults.isEmpty)
+        let matching = broaderResults.filter { releaseArtist(of: $0, matches: artist) }
+        guard allowArtistOnlyFallback else {
+            return TrackSearchResult(releases: matching, usedBroaderTitleOnlyFallback: false)
+        }
+        let others = broaderResults.filter { !releaseArtist(of: $0, matches: artist) }
+        return TrackSearchResult(releases: matching + others, usedBroaderTitleOnlyFallback: matching.isEmpty && !others.isEmpty)
+    }
+
+    /// Whether a release's own artist (Discogs' "Artist - Title") is `artist`,
+    /// ignoring case, accents, punctuation, "feat." credits and Discogs' "*" /
+    /// " (2)" name suffixes. Either may contain the other, so "Wareband"
+    /// matches "Wareband Featuring Tad Robinson" and "808 State & UB40".
+    static func releaseArtist(of release: DiscogsRelease, matches artist: String) -> Bool {
+        guard let releaseArtist = release.parsedArtist else { return false }
+        func key(_ name: String) -> String {
+            MetadataQuery.strippingFeaturedArtist(from: name)
+                .replacingOccurrences(of: #"\s\(\d+\)"#, with: "", options: .regularExpression)
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                .unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+                .map(String.init).joined()
+        }
+        let found = key(releaseArtist), wanted = key(artist)
+        // Very short names ("X") would be contained in almost anything.
+        guard found.count >= 3, wanted.count >= 3 else { return !found.isEmpty && found == wanted }
+        return found.contains(wanted) || wanted.contains(found)
     }
 
     /// Combines an artist and a track title into one free-text search term

@@ -38,11 +38,15 @@ enum MetadataQuery {
     /// "Artist - Title" filename (`artistParsedFromFileName`) — a
     /// filename-derived guess beats sending no artist term at all when the
     /// filename actually states one.
+    ///
+    /// A "feat." credit is dropped ("Wareband Feat. Tad Robinson" → "Wareband"):
+    /// Discogs credits featured artists differently, so the full string found
+    /// nothing and forced the weaker title-only search.
     static func artist(for file: AudioFile) -> String {
-        if file.category == .albums {
-            return file.expectedArtist ?? file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
-        }
-        return file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
+        let artist = file.category == .albums
+            ? file.expectedArtist ?? file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
+            : file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
+        return strippingFeaturedArtist(from: artist)
     }
 
     /// Parses the artist out of an "Artist - Title" filename — the text

@@ -40,6 +40,31 @@ struct DiscogsClientSearchTests {
         #expect(query.contains(URLQueryItem(name: "q", value: "Hotel Costes 10")))
     }
 
+    // MARK: - releaseArtist(of:matches:) (title-only fallback)
+
+    private static func release(_ title: String) -> DiscogsRelease {
+        DiscogsRelease(id: 1, title: title, year: nil, genre: nil, style: nil,
+                       label: nil, format: nil, thumb: nil, coverImage: nil)
+    }
+
+    @Test func releaseArtistMatchesIgnoringFeatCreditsAndDiscogsSuffixes() {
+        #expect(DiscogsClient.releaseArtist(of: Self.release("Wareband - A Better Day (Remix)"), matches: "Wareband"))
+        #expect(DiscogsClient.releaseArtist(of: Self.release("Wareband Featuring Tad Robinson - A Better Day"), matches: "Wareband"))
+        #expect(DiscogsClient.releaseArtist(of: Self.release("The Donald* - A Better Day"), matches: "The Donald"))
+        #expect(DiscogsClient.releaseArtist(of: Self.release("Crisis (2) - Kollectiv"), matches: "Crisis"))
+    }
+
+    @Test func releaseArtistRejectsSomeoneElse() {
+        #expect(!DiscogsClient.releaseArtist(of: Self.release("Taborah Adams - A Better Day"), matches: "Wareband"))
+        #expect(!DiscogsClient.releaseArtist(of: Self.release("Xavier - Song"), matches: "X"))
+    }
+
+    @Test func queryArtistDropsTheFeatCredit() {
+        let file = Self.makeFile(category: .singles, fileName: "02 - A Better Day (Garage Remix).mp3",
+                                 artist: "Wareband Feat. Tad Robinson", expectedArtist: nil, album: nil)
+        #expect(DiscogsQuery(for: file).artist == "Wareband")
+    }
+
     // MARK: - shouldAttemptArtistOnlyFallback (search's third retry tier)
 
     @Test func attemptsArtistOnlyFallbackWhenAllowedWithBothArtistAndTrack() {
