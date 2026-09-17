@@ -197,8 +197,10 @@ enum MetadataQuery {
     static func strippingFeaturedArtist(from title: String) -> String {
         // Outside brackets the dot (or "featuring") is required, so a real
         // title like "The Feat Of Clay" is left alone.
-        let bracketedCredit = #"(?:feat\.?|ft\.?|featuring)\s"#
-        let bareCredit = #"(?:feat\.|ft\.|featuring)\s"#
+        // Accented spellings happen in the wild ("(féat. Dyme)").
+        let feat = #"f[eéèê]at"#
+        let bracketedCredit = #"(?:"# + feat + #"\.?|ft\.?|"# + feat + #"uring)\s"#
+        let bareCredit = #"(?:"# + feat + #"\.|ft\.|"# + feat + #"uring)\s"#
         return title
             .replacingOccurrences(of: #"\s*[\(\[]\s*"# + bracketedCredit + #"[^\)\]]*[\)\]]"#, with: "",
                                   options: [.regularExpression, .caseInsensitive])

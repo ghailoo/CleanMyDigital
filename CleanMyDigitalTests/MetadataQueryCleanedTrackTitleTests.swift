@@ -202,6 +202,12 @@ struct FeaturedArtistStrippingTests {
         #expect(MetadataQuery.strippingFeaturedArtist(from: "Soul Magic Featuring Jonell") == "Soul Magic")
     }
 
+    @Test func handlesAccentedSpellings() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "09 My Love Is Your Love (f\u{00E9}at. Dyme) [Wyclef Remix].m4a",
+            artist: "Whitney Houston", category: .singles) == "My Love Is Your Love [Wyclef Remix]")
+    }
+
     @Test func leavesTitlesWithoutACreditAlone() {
         #expect(MetadataQuery.strippingFeaturedArtist(from: "The Feat Of Clay") == "The Feat Of Clay")
         #expect(MetadataQuery.strippingFeaturedArtist(from: "Loft Party (Club Mix)") == "Loft Party (Club Mix)")
