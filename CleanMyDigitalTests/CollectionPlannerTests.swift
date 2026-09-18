@@ -19,10 +19,10 @@ struct CollectionPlannerTests {
         let proposals = CollectionPlanner.plan(for: [clubMix, radioEdit])
             .sorted { $0.file.fileName < $1.file.fileName }
         #expect(proposals.count == 2)
-        #expect(proposals[0].releaseFolderName == "Ahora Es")
-        #expect(proposals[0].proposedRelativePath == "Ahora Es/2 In A Room - Ahora Es (Club Mix).flac")
-        #expect(proposals[1].releaseFolderName == "Ahora Es")
-        #expect(proposals[1].proposedRelativePath == "Ahora Es/2 In A Room - Ahora Es (Radio Edit).flac")
+        #expect(proposals[0].releaseFolderName == "Artist - Ahora Es")
+        #expect(proposals[0].proposedRelativePath == "Artist - Ahora Es/2 In A Room - Ahora Es (Club Mix).flac")
+        #expect(proposals[1].releaseFolderName == "Artist - Ahora Es")
+        #expect(proposals[1].proposedRelativePath == "Artist - Ahora Es/2 In A Room - Ahora Es (Radio Edit).flac")
     }
 
     @Test func titleWithoutMixSuffixUsesWholeTitle() {
@@ -31,15 +31,26 @@ struct CollectionPlannerTests {
             title: "Pacific 0101", category: .singles)
 
         let proposals = CollectionPlanner.plan(for: [file])
-        #expect(proposals.first?.releaseFolderName == "Pacific 0101")
-        #expect(proposals.first?.proposedRelativePath == "Pacific 0101/track.flac")
+        #expect(proposals.first?.releaseFolderName == "Artist - Pacific 0101")
+        #expect(proposals.first?.proposedRelativePath == "Artist - Pacific 0101/track.flac")
     }
 
-    @Test func filesMissingTitleGetNoProposal() {
+    /// No Title tag: the filename carries it, so the file is still collected
+    /// rather than silently skipped.
+    @Test func filesMissingTitleFallBackToTheFileName() {
         let file = Self.makeFile(
-            path: "/Library/Singles/Artist/track.flac", title: nil, category: .singles)
+            path: "/Library/Singles/YBU/02 - YBU - Soul Magic (funk vocal version) (feat. Jonell).flac",
+            title: nil, category: .singles, artist: "YBU")
 
-        #expect(CollectionPlanner.plan(for: [file]).isEmpty)
+        #expect(CollectionPlanner.plan(for: [file]).first?.releaseFolderName == "YBU - Soul Magic")
+    }
+
+    @Test func stripsABracketedMixSuffixToo() {
+        let file = Self.makeFile(
+            path: "/Library/Singles/Whitney Houston/09 My Love Is Your Love [Wyclef Remix].m4a",
+            title: "My Love Is Your Love (Radio Edit) [Wyclef Remix]", category: .singles)
+
+        #expect(CollectionPlanner.plan(for: [file]).first?.releaseFolderName == "Artist - My Love Is Your Love")
     }
 
     @Test func albumsAndCompilationsAreSkipped() {
@@ -55,7 +66,7 @@ struct CollectionPlannerTests {
 
     @Test func fileAlreadyInsideMatchingReleaseFolderGetsNoProposal() {
         let file = Self.makeFile(
-            path: "/Library/Singles/2 In A Room/Ahora Es/2 In A Room - Ahora Es (Club Mix).flac",
+            path: "/Library/Singles/2 In A Room/Artist - Ahora Es/2 In A Room - Ahora Es (Club Mix).flac",
             title: "Ahora Es (Club Mix)", category: .singles)
 
         #expect(CollectionPlanner.plan(for: [file]).isEmpty)
@@ -67,7 +78,7 @@ struct CollectionPlannerTests {
             title: "Rock / Roll: Ain't Noise Pollution (12\" Mix)", category: .singles)
 
         let proposals = CollectionPlanner.plan(for: [file])
-        #expect(proposals.first?.releaseFolderName == "Rock - Roll- Ain't Noise Pollution")
+        #expect(proposals.first?.releaseFolderName == "Artist - Rock - Roll- Ain't Noise Pollution")
     }
 
     // MARK: - Fixture
@@ -75,7 +86,8 @@ struct CollectionPlannerTests {
     private static func makeFile(
         path: String,
         title: String?,
-        category: LibraryCategory
+        category: LibraryCategory,
+        artist: String? = "Artist"
     ) -> AudioFile {
         let url = URL(fileURLWithPath: path)
         return AudioFile(
@@ -86,7 +98,7 @@ struct CollectionPlannerTests {
             duration: 180,
             bitrateKbps: nil,
             title: title,
-            artist: "Artist",
+            artist: artist,
             album: "Album",
             artworkThumbnail: nil,
             year: "2000",
