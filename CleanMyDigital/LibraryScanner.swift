@@ -29,15 +29,17 @@ final class LibraryScanner {
         case finished
     }
 
-    private struct RenameLogEntry: Sendable {
-        let oldURL: URL
-        let newURL: URL
-        /// True when this entry moved a whole album folder (see
-        /// `renameAlbumFolders`) rather than a single file — `oldURL`/
-        /// `newURL` are folder paths, so reversing it in
-        /// `undoLastFileOperation` has to update every file whose parent
-        /// matches, not look for one exact-URL match like the other entries.
-        let isFolderMove: Bool
+    private enum RenameLogEntry: Sendable {
+        /// A single file relocated — `renameFiles`, `collectIntoFolders`,
+        /// `moveDuplicates`.
+        case fileMove(old: URL, new: URL)
+        /// A whole album folder moved (see `renameAlbumFolders`) — reversing
+        /// it in `undoLastFileOperation` has to update every file whose
+        /// parent matches, not look for one exact-URL match like a file move.
+        case folderMove(old: URL, new: URL)
+        /// A folder removed because "Collect into Folders" emptied it —
+        /// undo recreates it via `createDirectory`.
+        case folderRemoved(URL)
     }
 
     private(set) var state: State = .idle
@@ -175,6 +177,19 @@ final class LibraryScanner {
     /// Picks the *longest* matching root, so selecting both a parent
     /// folder and something inside it resolves each file to its nearest
     /// enclosing root rather than whichever happened to be chosen first.
+    /// A moved file with its folder-derived `expectedArtist` recomputed: for
+    /// Singles/Compilations it's the first folder under the scanned root,
+    /// which a move can change. Keeping the stale value made a second
+    /// "Collect into Folders" treat the new song folder as the artist folder
+    /// and nest another song folder inside it. Albums keep theirs — it's the
+    /// artist folder (or an explicit override), which no move here changes.
+    private func relocated(_ file: AudioFile, to newURL: URL) -> AudioFile {
+        guard file.category != .albums, let root = root(containing: newURL) else {
+            return file.renamed(to: newURL)
+        }
+        return file.renamed(to: newURL, expectedArtist: .some(Self.firstLevelFolderName(for: newURL, in: root)))
+    }
+
     func root(containing fileURL: URL) -> URL? {
         let fileComponents = fileURL.standardizedFileURL.pathComponents
         return scannedFolders
@@ -501,9 +516,9 @@ final class LibraryScanner {
 
             do {
                 try performMove(from: oldURL, to: newURL)
-                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL, isFolderMove: false))
+                batch.append(.fileMove(old: oldURL, new: newURL))
                 if let index = files.firstIndex(where: { $0.url == oldURL }) {
-                    files[index] = files[index].renamed(to: newURL)
+                    files[index] = relocated(files[index], to: newURL)
                 }
                 if let outcome = lookupResults.removeValue(forKey: oldURL) {
                     lookupResults[newURL] = outcome
@@ -527,13 +542,17 @@ final class LibraryScanner {
         return results
     }
 
-    /// Moves each proposal's file into its release subfolder (created if
-    /// needed) via `FileManager.moveItem`, same access/error-handling
-    /// pattern as `renameFiles` — and shares its undo batch, since both are
-    /// just moves from one URL to another.
-    func collectIntoFolders(_ proposals: [CollectionProposal]) async -> [RenameOperationResult] {
+    /// Moves every track proposal in each approved plan into
+    /// `Artist/Song Title/Pressing` (created as needed), same
+    /// access/error-handling pattern as `renameFiles`. Afterward, for each
+    /// plan's `sourceFoldersToClean`, relocates any non-audio siblings the
+    /// scanner never tracked as `AudioFile`s (covers, .cue/.log/.nfo/.m3u)
+    /// alongside the tracks that moved out of there, then removes folders
+    /// left completely empty. Shares the same undo batch as `renameFiles`.
+    func collectIntoFolders(_ plans: [ArtistCollectionPlan]) async -> [RenameOperationResult] {
+        let allProposals = plans.flatMap(\.proposals)
         guard hasScannedFolder else {
-            return proposals.map {
+            return allProposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
                                        proposedName: $0.proposedRelativePath,
                                        errorDescription: "No scanned folder to organize within.")
@@ -541,7 +560,7 @@ final class LibraryScanner {
         }
 
         guard let accessed = beginAccessToAllRoots() else {
-            return proposals.map {
+            return allProposals.map {
                 RenameOperationResult(originalURL: $0.file.url, currentName: $0.file.fileName,
                                        proposedName: $0.proposedRelativePath,
                                        errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
@@ -552,32 +571,46 @@ final class LibraryScanner {
         var results: [RenameOperationResult] = []
         var batch: [RenameLogEntry] = []
 
-        for proposal in proposals {
-            let oldURL = proposal.file.url
-            let destinationFolder = oldURL.deletingLastPathComponent()
-                .appendingPathComponent(proposal.releaseFolderName)
-            let newURL = destinationFolder.appendingPathComponent(oldURL.lastPathComponent)
+        for plan in plans {
+            for proposal in plan.proposals {
+                let oldURL = proposal.file.url
+                let newURL = plan.artistRoot.appendingPathComponent(proposal.proposedRelativePath)
+                let destinationFolder = newURL.deletingLastPathComponent()
 
-            do {
-                try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
-                try performMove(from: oldURL, to: newURL)
-                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL, isFolderMove: false))
-                if let index = files.firstIndex(where: { $0.url == oldURL }) {
-                    files[index] = files[index].renamed(to: newURL)
+                do {
+                    try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
+                    try performMove(from: oldURL, to: newURL)
+                    batch.append(.fileMove(old: oldURL, new: newURL))
+                    if let index = files.firstIndex(where: { $0.url == oldURL }) {
+                        files[index] = relocated(files[index], to: newURL)
+                    }
+                    if let outcome = lookupResults.removeValue(forKey: oldURL) {
+                        lookupResults[newURL] = outcome
+                    }
+                    if let outcome = spectralResults.removeValue(forKey: oldURL) {
+                        spectralResults[newURL] = outcome
+                    }
+                    results.append(RenameOperationResult(
+                        originalURL: oldURL, currentName: proposal.file.fileName,
+                        proposedName: proposal.proposedRelativePath, errorDescription: nil))
+                } catch {
+                    results.append(RenameOperationResult(
+                        originalURL: oldURL, currentName: proposal.file.fileName,
+                        proposedName: proposal.proposedRelativePath, errorDescription: error.localizedDescription))
                 }
-                if let outcome = lookupResults.removeValue(forKey: oldURL) {
-                    lookupResults[newURL] = outcome
+            }
+
+            for sourceFolder in plan.sourceFoldersToClean {
+                let sourcePrefix = sourceFolder.standardizedFileURL.path + "/"
+                if let representativeProposal = plan.proposals.first(where: {
+                    $0.file.url.standardizedFileURL.path.hasPrefix(sourcePrefix)
+                }) {
+                    let destination = plan.artistRoot
+                        .appendingPathComponent(representativeProposal.proposedRelativePath)
+                        .deletingLastPathComponent()
+                    relocateSiblingFiles(from: sourceFolder, to: destination, batch: &batch)
                 }
-                if let outcome = spectralResults.removeValue(forKey: oldURL) {
-                    spectralResults[newURL] = outcome
-                }
-                results.append(RenameOperationResult(
-                    originalURL: oldURL, currentName: proposal.file.fileName,
-                    proposedName: proposal.proposedRelativePath, errorDescription: nil))
-            } catch {
-                results.append(RenameOperationResult(
-                    originalURL: oldURL, currentName: proposal.file.fileName,
-                    proposedName: proposal.proposedRelativePath, errorDescription: error.localizedDescription))
+                removeIfEmptyRecursively(sourceFolder, batch: &batch)
             }
         }
 
@@ -585,6 +618,62 @@ final class LibraryScanner {
             lastRenameBatch = batch
         }
         return results
+    }
+
+    /// Moves every remaining regular file under `sourceFolder` (the
+    /// non-audio siblings a scan never enumerates) into `destination`,
+    /// flattening any nesting. Best-effort — skips a file it can't move
+    /// rather than aborting the rest of the cleanup, since none of these
+    /// are tracked `AudioFile`s to report a failure against.
+    private func relocateSiblingFiles(from sourceFolder: URL, to destination: URL, batch: inout [RenameLogEntry]) {
+        guard let enumerator = FileManager.default.enumerator(
+            at: sourceFolder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for case let fileURL as URL in enumerator {
+            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+
+            var newURL = destination.appendingPathComponent(fileURL.lastPathComponent)
+            if FileManager.default.fileExists(atPath: newURL.path) {
+                let ext = fileURL.pathExtension
+                let base = fileURL.deletingPathExtension().lastPathComponent
+                var suffix = 2
+                repeat {
+                    let candidateName = ext.isEmpty ? "\(base) (\(suffix))" : "\(base) (\(suffix)).\(ext)"
+                    newURL = destination.appendingPathComponent(candidateName)
+                    suffix += 1
+                } while FileManager.default.fileExists(atPath: newURL.path)
+            }
+
+            do {
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                try performMove(from: fileURL, to: newURL)
+                batch.append(.fileMove(old: fileURL, new: newURL))
+            } catch {
+                continue
+            }
+        }
+    }
+
+    /// Removes now-empty subfolders under `folder` bottom-up, then `folder`
+    /// itself if it too ended up empty. Never touches anything still
+    /// containing a file, and never reaches above `folder` into the artist
+    /// root.
+    private func removeIfEmptyRecursively(_ folder: URL, batch: inout [RenameLogEntry]) {
+        if let contents = try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        ) {
+            for item in contents where (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                removeIfEmptyRecursively(item, batch: &batch)
+            }
+        }
+
+        guard let remaining = try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ), remaining.isEmpty else { return }
+
+        guard (try? FileManager.default.removeItem(at: folder)) != nil else { return }
+        batch.append(.folderRemoved(folder))
     }
 
     /// Moves each proposal's file into the "_CleanMyDigital Duplicates"
@@ -632,9 +721,9 @@ final class LibraryScanner {
             do {
                 try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
                 try performMove(from: oldURL, to: newURL)
-                batch.append(RenameLogEntry(oldURL: oldURL, newURL: newURL, isFolderMove: false))
+                batch.append(.fileMove(old: oldURL, new: newURL))
                 if let index = files.firstIndex(where: { $0.url == oldURL }) {
-                    files[index] = files[index].renamed(to: newURL)
+                    files[index] = relocated(files[index], to: newURL)
                 }
                 if let outcome = lookupResults.removeValue(forKey: oldURL) {
                     lookupResults[newURL] = outcome
@@ -707,7 +796,7 @@ final class LibraryScanner {
 
             do {
                 try performMove(from: oldFolderURL, to: newFolderURL)
-                batch.append(RenameLogEntry(oldURL: oldFolderURL, newURL: newFolderURL, isFolderMove: true))
+                batch.append(.folderMove(old: oldFolderURL, new: newFolderURL))
                 for groupFile in proposal.group.files {
                     let oldFileURL = groupFile.url
                     let newFileURL = newFolderURL.appendingPathComponent(oldFileURL.lastPathComponent)
@@ -740,29 +829,59 @@ final class LibraryScanner {
     /// Reverses the most recent move batch (a rename, a "Collect into
     /// Folders" run, a duplicate move, or an album-folder rename),
     /// most-recent-first so any collision-avoidance ordering unwinds
-    /// correctly. A folder-level entry (`isFolderMove`) updates every file
-    /// whose parent folder is the moved folder, since there's no single
-    /// file URL to match against like the other entry kinds.
+    /// correctly. A `.folderMove` entry updates every file whose parent
+    /// folder is the moved folder, since there's no single file URL to
+    /// match against like a `.fileMove`; a `.folderRemoved` entry just
+    /// recreates the folder.
     func undoLastFileOperation() async -> [RenameOperationResult] {
         guard hasScannedFolder, !lastRenameBatch.isEmpty else { return [] }
 
         guard let accessed = beginAccessToAllRoots() else {
-            return lastRenameBatch.map {
-                RenameOperationResult(originalURL: $0.newURL, currentName: $0.newURL.lastPathComponent,
-                                       proposedName: $0.oldURL.lastPathComponent,
-                                       errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+            return lastRenameBatch.map { entry in
+                switch entry {
+                case .fileMove(let old, let new), .folderMove(let old, let new):
+                    return RenameOperationResult(originalURL: new, currentName: new.lastPathComponent,
+                                                  proposedName: old.lastPathComponent,
+                                                  errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+                case .folderRemoved(let url):
+                    return RenameOperationResult(originalURL: url, currentName: url.lastPathComponent,
+                                                  proposedName: url.lastPathComponent,
+                                                  errorDescription: TagWriteError.folderAccessUnavailable.localizedDescription)
+                }
             }
         }
         defer { endAccess(accessed) }
 
         var results: [RenameOperationResult] = []
         for entry in lastRenameBatch.reversed() {
-            do {
-                try performMove(from: entry.newURL, to: entry.oldURL)
-                if entry.isFolderMove {
-                    for index in files.indices where files[index].url.deletingLastPathComponent() == entry.newURL {
+            switch entry {
+            case .fileMove(let oldURL, let newURL):
+                do {
+                    try performMove(from: newURL, to: oldURL)
+                    if let index = files.firstIndex(where: { $0.url == newURL }) {
+                        files[index] = files[index].renamed(to: oldURL)
+                        if let outcome = lookupResults.removeValue(forKey: newURL) {
+                            lookupResults[oldURL] = outcome
+                        }
+                        if let outcome = spectralResults.removeValue(forKey: newURL) {
+                            spectralResults[oldURL] = outcome
+                        }
+                    }
+                    results.append(RenameOperationResult(
+                        originalURL: newURL, currentName: newURL.lastPathComponent,
+                        proposedName: oldURL.lastPathComponent, errorDescription: nil))
+                } catch {
+                    results.append(RenameOperationResult(
+                        originalURL: newURL, currentName: newURL.lastPathComponent,
+                        proposedName: oldURL.lastPathComponent, errorDescription: error.localizedDescription))
+                }
+
+            case .folderMove(let oldURL, let newURL):
+                do {
+                    try performMove(from: newURL, to: oldURL)
+                    for index in files.indices where files[index].url.deletingLastPathComponent() == newURL {
                         let oldFileURL = files[index].url
-                        let restoredURL = entry.oldURL.appendingPathComponent(oldFileURL.lastPathComponent)
+                        let restoredURL = oldURL.appendingPathComponent(oldFileURL.lastPathComponent)
                         files[index] = files[index].renamed(to: restoredURL)
                         if let outcome = lookupResults.removeValue(forKey: oldFileURL) {
                             lookupResults[restoredURL] = outcome
@@ -771,22 +890,26 @@ final class LibraryScanner {
                             spectralResults[restoredURL] = outcome
                         }
                     }
-                } else if let index = files.firstIndex(where: { $0.url == entry.newURL }) {
-                    files[index] = files[index].renamed(to: entry.oldURL)
-                    if let outcome = lookupResults.removeValue(forKey: entry.newURL) {
-                        lookupResults[entry.oldURL] = outcome
-                    }
-                    if let outcome = spectralResults.removeValue(forKey: entry.newURL) {
-                        spectralResults[entry.oldURL] = outcome
-                    }
+                    results.append(RenameOperationResult(
+                        originalURL: newURL, currentName: newURL.lastPathComponent,
+                        proposedName: oldURL.lastPathComponent, errorDescription: nil))
+                } catch {
+                    results.append(RenameOperationResult(
+                        originalURL: newURL, currentName: newURL.lastPathComponent,
+                        proposedName: oldURL.lastPathComponent, errorDescription: error.localizedDescription))
                 }
-                results.append(RenameOperationResult(
-                    originalURL: entry.newURL, currentName: entry.newURL.lastPathComponent,
-                    proposedName: entry.oldURL.lastPathComponent, errorDescription: nil))
-            } catch {
-                results.append(RenameOperationResult(
-                    originalURL: entry.newURL, currentName: entry.newURL.lastPathComponent,
-                    proposedName: entry.oldURL.lastPathComponent, errorDescription: error.localizedDescription))
+
+            case .folderRemoved(let url):
+                do {
+                    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                    results.append(RenameOperationResult(
+                        originalURL: url, currentName: url.lastPathComponent,
+                        proposedName: url.lastPathComponent, errorDescription: nil))
+                } catch {
+                    results.append(RenameOperationResult(
+                        originalURL: url, currentName: url.lastPathComponent,
+                        proposedName: url.lastPathComponent, errorDescription: error.localizedDescription))
+                }
             }
         }
         lastRenameBatch = []

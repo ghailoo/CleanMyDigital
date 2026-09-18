@@ -8,16 +8,21 @@ import SwiftUI
 struct CollectSheetView: View {
     let scanner: LibraryScanner
 
-    @State private var proposals: [CollectionProposal] = []
-    @State private var selection: Set<URL> = []
+    @State private var plans: [ArtistCollectionPlan] = []
+    @State private var selectedArtists: Set<URL> = []
     @State private var isBusy = false
     @State private var errorsByURL: [URL: String] = [:]
     @State private var lastRunSummary: String?
 
+    private var proposalCount: Int { plans.reduce(0) { $0 + $1.proposals.count } }
+    private var selectedProposalCount: Int {
+        plans.filter { selectedArtists.contains($0.artistRoot) }.reduce(0) { $0 + $1.proposals.count }
+    }
+
     var body: some View {
         SheetWindowContainer(
             title: "Collect into Folders",
-            subtitle: "Groups each Singles track's different mixes into a subfolder named after the release, using the Title tag.",
+            subtitle: "Organizes each artist's Singles into Song Title/Pressing subfolders, using the Title tag.",
             windowID: "collect-into-folders"
         ) {
             content
@@ -29,40 +34,48 @@ struct CollectSheetView: View {
 
     private var content: some View {
         Group {
-            if proposals.isEmpty {
+            if plans.isEmpty {
                 ContentUnavailableView {
                     Label("Nothing to Collect", systemImage: "checkmark.circle")
                 } description: {
-                    Text("Every Singles file is already inside a folder matching its release name, or is missing a Title tag.")
+                    Text("Every Singles folder is already organized, or its tracks are missing a Title tag.")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                table
+                list
             }
         }
-        .consistentAnimation(proposals.isEmpty)
+        .consistentAnimation(plans.isEmpty)
     }
 
-    private var table: some View {
-        Table(proposals) {
-            TableColumn("") { proposal in
-                Toggle("", isOn: selectionBinding(for: proposal.id))
-                    .labelsHidden()
-                    .accessibilityLabel("Select \(proposal.file.fileName)")
-            }
-            .width(24)
+    private var list: some View {
+        List {
+            ForEach(plans) { plan in
+                Section {
+                    ForEach(plan.proposals) { proposal in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text(proposal.file.fileName).lineLimit(1)
+                                Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.secondary)
+                                Text(proposal.proposedRelativePath).lineLimit(1).foregroundStyle(.secondary)
+                            }
+                            .help("\(proposal.file.fileName) → \(proposal.proposedRelativePath)")
 
-            TableColumn("File") { proposal in
-                Text(proposal.file.fileName).lineLimit(1).help(proposal.file.fileName)
-            }
-
-            TableColumn("New Location") { proposal in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(proposal.proposedRelativePath).lineLimit(1).help(proposal.proposedRelativePath)
-                    if let error = errorsByURL[proposal.id] {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.red)
+                            if proposal.hasOddExtension {
+                                Label("Unusual file extension — check this file", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if let error = errorsByURL[proposal.id] {
+                                Label(error, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                } header: {
+                    Toggle(isOn: artistSelectionBinding(for: plan.artistRoot)) {
+                        Text(plan.artistFolderName)
                     }
                 }
             }
@@ -71,7 +84,7 @@ struct CollectSheetView: View {
 
     private var footer: some View {
         HStack {
-            Text("\(selection.count) of \(proposals.count) selected")
+            Text("\(selectedProposalCount) of \(proposalCount) selected")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if let lastRunSummary {
@@ -87,7 +100,7 @@ struct CollectSheetView: View {
             }
             Button("Collect Selected") { Task { await collect() } }
                 .buttonStyle(.borderedProminent)
-                .disabled(selection.isEmpty || isBusy)
+                .disabled(selectedArtists.isEmpty || isBusy)
         }
         .padding()
         // Appears once a collect/undo batch finishes — same reasoning as
@@ -95,18 +108,18 @@ struct CollectSheetView: View {
         .consistentAnimation(lastRunSummary)
     }
 
-    private func selectionBinding(for id: URL) -> Binding<Bool> {
+    private func artistSelectionBinding(for artistRoot: URL) -> Binding<Bool> {
         Binding(
-            get: { selection.contains(id) },
+            get: { selectedArtists.contains(artistRoot) },
             set: { isOn in
-                if isOn { selection.insert(id) } else { selection.remove(id) }
+                if isOn { selectedArtists.insert(artistRoot) } else { selectedArtists.remove(artistRoot) }
             }
         )
     }
 
     private func rebuildPlan() {
-        proposals = CollectionPlanner.plan(for: scanner.files)
-        selection = Set(proposals.map(\.id))
+        plans = CollectionPlanner.plan(for: scanner.files)
+        selectedArtists = Set(plans.map(\.artistRoot))
         errorsByURL = [:]
     }
 
@@ -114,8 +127,8 @@ struct CollectSheetView: View {
         isBusy = true
         defer { isBusy = false }
 
-        let selected = proposals.filter { selection.contains($0.id) }
-        let outcomes = await scanner.collectIntoFolders(selected)
+        let selectedPlans = plans.filter { selectedArtists.contains($0.artistRoot) }
+        let outcomes = await scanner.collectIntoFolders(selectedPlans)
 
         var newErrors: [URL: String] = [:]
         var succeededCount = 0
@@ -130,13 +143,11 @@ struct CollectSheetView: View {
         }
         errorsByURL = newErrors
 
-        let succeededURLs = Set(outcomes.filter(\.succeeded).map(\.originalURL))
-        proposals.removeAll { succeededURLs.contains($0.id) }
-        selection.subtract(succeededURLs)
-
         lastRunSummary = failedCount == 0
             ? "Moved \(pluralized(succeededCount, "file"))."
             : "Moved \(succeededCount), \(failedCount) failed."
+
+        rebuildPlan()
     }
 
     private func undo() async {

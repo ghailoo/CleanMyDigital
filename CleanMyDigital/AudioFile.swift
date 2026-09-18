@@ -171,8 +171,9 @@ struct AudioFile: Identifiable, Sendable {
 
     /// A copy of this file at `newURL` — used after a successful rename, so
     /// the scanner can update its record in place without a full re-scan.
-    func renamed(to newURL: URL) -> AudioFile {
-        AudioFile(url: newURL, fileName: newURL.lastPathComponent, fileExtension: fileExtension,
+    func renamed(to newURL: URL, expectedArtist newExpectedArtist: String?? = nil) -> AudioFile {
+        let expectedArtist = newExpectedArtist ?? expectedArtist
+        return AudioFile(url: newURL, fileName: newURL.lastPathComponent, fileExtension: fileExtension,
                   sizeBytes: sizeBytes, duration: duration, bitrateKbps: bitrateKbps,
                   title: title, artist: artist, album: album,
                   artworkThumbnail: artworkThumbnail,

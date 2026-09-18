@@ -8,88 +8,200 @@ import Foundation
 @testable import CleanMyDigital
 
 struct CollectionPlannerTests {
-    @Test func groupsMixesUnderReleaseNameStrippedOfMixSuffix() {
+    @Test func groupsMixesUnderSongTitleStrippedOfMixSuffix() throws {
         let clubMix = Self.makeFile(
             path: "/Library/Singles/2 In A Room/2 In A Room - Ahora Es (Club Mix).flac",
-            title: "Ahora Es (Club Mix)", category: .singles)
+            artistRoot: "/Library/Singles/2 In A Room", title: "Ahora Es (Club Mix)")
         let radioEdit = Self.makeFile(
             path: "/Library/Singles/2 In A Room/2 In A Room - Ahora Es (Radio Edit).flac",
-            title: "Ahora Es (Radio Edit)", category: .singles)
+            artistRoot: "/Library/Singles/2 In A Room", title: "Ahora Es (Radio Edit)")
 
-        let proposals = CollectionPlanner.plan(for: [clubMix, radioEdit])
-            .sorted { $0.file.fileName < $1.file.fileName }
+        let plan = try #require(CollectionPlanner.plan(for: [clubMix, radioEdit]).first)
+        let proposals = plan.proposals.sorted { $0.file.fileName < $1.file.fileName }
         #expect(proposals.count == 2)
-        #expect(proposals[0].releaseFolderName == "Artist - Ahora Es")
-        #expect(proposals[0].proposedRelativePath == "Artist - Ahora Es/2 In A Room - Ahora Es (Club Mix).flac")
-        #expect(proposals[1].releaseFolderName == "Artist - Ahora Es")
-        #expect(proposals[1].proposedRelativePath == "Artist - Ahora Es/2 In A Room - Ahora Es (Radio Edit).flac")
+        #expect(proposals[0].proposedRelativePath == "Ahora Es/2 In A Room - Ahora Es (Club Mix).flac")
+        #expect(proposals[1].proposedRelativePath == "Ahora Es/2 In A Room - Ahora Es (Radio Edit).flac")
     }
 
-    @Test func titleWithoutMixSuffixUsesWholeTitle() {
+    @Test func titleWithoutMixSuffixUsesWholeTitle() throws {
         let file = Self.makeFile(
             path: "/Library/Singles/808 State/track.flac",
-            title: "Pacific 0101", category: .singles)
+            artistRoot: "/Library/Singles/808 State", title: "Pacific 0101")
 
-        let proposals = CollectionPlanner.plan(for: [file])
-        #expect(proposals.first?.releaseFolderName == "Artist - Pacific 0101")
-        #expect(proposals.first?.proposedRelativePath == "Artist - Pacific 0101/track.flac")
+        let proposal = try #require(CollectionPlanner.plan(for: [file]).first?.proposals.first)
+        #expect(proposal.proposedRelativePath == "Pacific 0101/track.flac")
     }
 
     /// No Title tag: the filename carries it, so the file is still collected
     /// rather than silently skipped.
-    @Test func filesMissingTitleFallBackToTheFileName() {
+    @Test func filesMissingTitleFallBackToTheFileName() throws {
         let file = Self.makeFile(
             path: "/Library/Singles/YBU/02 - YBU - Soul Magic (funk vocal version) (feat. Jonell).flac",
-            title: nil, category: .singles, artist: "YBU")
+            artistRoot: "/Library/Singles/YBU", title: nil, artist: "YBU")
 
-        #expect(CollectionPlanner.plan(for: [file]).first?.releaseFolderName == "YBU - Soul Magic")
-    }
-
-    @Test func stripsABracketedMixSuffixToo() {
-        let file = Self.makeFile(
-            path: "/Library/Singles/Whitney Houston/09 My Love Is Your Love [Wyclef Remix].m4a",
-            title: "My Love Is Your Love (Radio Edit) [Wyclef Remix]", category: .singles)
-
-        #expect(CollectionPlanner.plan(for: [file]).first?.releaseFolderName == "Artist - My Love Is Your Love")
+        let proposal = try #require(CollectionPlanner.plan(for: [file]).first?.proposals.first)
+        #expect(proposal.songTitle == "Soul Magic")
+        #expect(proposal.proposedRelativePath == "Soul Magic/02 - YBU - Soul Magic (funk vocal version) (feat. Jonell).flac")
     }
 
     @Test func albumsAndCompilationsAreSkipped() {
         let album = Self.makeFile(
             path: "/Library/Albums/Artist/Album/01 track.flac",
-            title: "Track (Remaster)", category: .albums)
+            artistRoot: "/Library/Albums/Artist", title: "Track (Remaster)", category: .albums)
         let compilation = Self.makeFile(
             path: "/Library/Compilations/Various/track.flac",
-            title: "Track (Remaster)", category: .compilations)
+            artistRoot: "/Library/Compilations/Various", title: "Track (Remaster)", category: .compilations)
 
         #expect(CollectionPlanner.plan(for: [album, compilation]).isEmpty)
     }
 
-    @Test func fileAlreadyInsideMatchingReleaseFolderGetsNoProposal() {
+    @Test func sanitizesPathHostileCharactersInSongTitle() throws {
         let file = Self.makeFile(
-            path: "/Library/Singles/2 In A Room/Artist - Ahora Es/2 In A Room - Ahora Es (Club Mix).flac",
-            title: "Ahora Es (Club Mix)", category: .singles)
+            path: "/Library/Singles/AC-DC/track.flac",
+            artistRoot: "/Library/Singles/AC-DC", title: "Rock / Roll: Ain't Noise Pollution (12\" Mix)")
+
+        let proposal = try #require(CollectionPlanner.plan(for: [file]).first?.proposals.first)
+        #expect(proposal.proposedRelativePath == "Rock - Roll- Ain't Noise Pollution/track.flac")
+    }
+
+    // MARK: - Rule 2: pressing folder name
+
+    @Test func pressingFolderNameUnwrapsABracketedDescriptor() throws {
+        let file = Self.makeFile(
+            path: "/Library/Singles/808 State/1990 - Close To You [12'' Promo Single]/track.flac",
+            artistRoot: "/Library/Singles/808 State", title: "Close To You")
+
+        let proposal = try #require(CollectionPlanner.plan(for: [file]).first?.proposals.first)
+        #expect(proposal.pressingName == "1990 - 12'' Promo Single")
+        #expect(proposal.proposedRelativePath == "Close To You/1990 - 12'' Promo Single/track.flac")
+    }
+
+    @Test func pressingFolderNameStripsArtistAndKeepsTheSecondBracketGroup() throws {
+        let file = Self.makeFile(
+            path: "/Library/Singles/Maxi Priest/Maxi Priest - Close To You (US CDS Promo) (1990) - PRCD2485/track.flac",
+            artistRoot: "/Library/Singles/Maxi Priest", title: "Close To You", artist: "Maxi Priest")
+
+        let proposal = try #require(CollectionPlanner.plan(for: [file]).first?.proposals.first)
+        #expect(proposal.pressingName == "US CDS Promo (1990) - PRCD2485")
+        #expect(proposal.proposedRelativePath == "Close To You/US CDS Promo (1990) - PRCD2485/track.flac")
+    }
+
+    @Test func pressingFolderNameEmptyAfterStrippingGoesStraightInSongFolder() throws {
+        let file = Self.makeFile(
+            path: "/Library/Singles/808 State/Close To You/track.flac",
+            artistRoot: "/Library/Singles/808 State", title: "Close To You")
+
+        // Top folder already *is* the song title — nothing pressing-specific
+        // left, and the file isn't nested any deeper, so it stays put.
+        #expect(CollectionPlanner.plan(for: [file]).isEmpty)
+    }
+
+    /// Field case: loose tracks of different songs directly in the artist
+    /// folder must each get their own song folder, not all the first one's.
+    @Test func looseTracksOfDifferentSongsGetTheirOwnSongFolders() {
+        let love = Self.makeFile(
+            path: "/Library/Singles/Adeva/Adeva - Beautiful Love (Remix) (1990).flac",
+            artistRoot: "/Library/Singles/Adeva", title: "Beautiful Love (Remix)", artist: "Adeva")
+        let around = Self.makeFile(
+            path: "/Library/Singles/Adeva/Adeva - Been Around (Triple S Mix).flac",
+            artistRoot: "/Library/Singles/Adeva", title: "Been Around (Triple S Mix)", artist: "Adeva")
+
+        let paths = CollectionPlanner.plan(for: [love, around]).flatMap(\.proposals).map(\.proposedRelativePath).sorted()
+        #expect(paths == ["Beautiful Love/Adeva - Beautiful Love (Remix) (1990).flac",
+                          "Been Around/Adeva - Been Around (Triple S Mix).flac"])
+    }
+
+    // MARK: - Rule 8: idempotency
+
+    @Test func alreadyOrganizedWithPressingProposesNothing() {
+        let file = Self.makeFile(
+            path: "/Library/Singles/Maxi Priest/Close To You/US CDS Promo (1990) - PRCD2485/Maxi Priest - Close To You.mp3",
+            artistRoot: "/Library/Singles/Maxi Priest", title: "Close To You", artist: "Maxi Priest")
 
         #expect(CollectionPlanner.plan(for: [file]).isEmpty)
     }
 
-    @Test func sanitizesPathHostileCharactersInReleaseName() {
+    /// The nesting bug from the field: a song folder holding a same-named
+    /// subfolder. Tracks must flatten into Song/Pressing under the real
+    /// artist folder, never into a new Song/Pressing inside the inner one.
+    @Test func sameNamedSubfolderFlattensInsteadOfNestingAgain() throws {
         let file = Self.makeFile(
-            path: "/Library/Singles/AC-DC/track.flac",
-            title: "Rock / Roll: Ain't Noise Pollution (12\" Mix)", category: .singles)
+            path: "/Library/Singles/Maxi Priest/Close To You/US 12'' (1990) - 0-96463/Close To You/Maxi Priest - Close To You.flac",
+            artistRoot: "/Library/Singles/Maxi Priest", title: "Close To You", artist: "Maxi Priest")
 
-        let proposals = CollectionPlanner.plan(for: [file])
-        #expect(proposals.first?.releaseFolderName == "Artist - Rock - Roll- Ain't Noise Pollution")
+        let plan = try #require(CollectionPlanner.plan(for: [file]).first)
+        #expect(plan.artistRoot.path == "/Library/Singles/Maxi Priest")
+        #expect(plan.proposals.first?.proposedRelativePath
+                == "Close To You/US 12'' (1990) - 0-96463/Maxi Priest - Close To You.flac")
+        #expect(plan.sourceFoldersToClean.map(\.path)
+                == ["/Library/Singles/Maxi Priest/Close To You/US 12'' (1990) - 0-96463/Close To You"])
+    }
+
+    @Test func alreadyOrganizedLooseInSongFolderProposesNothing() {
+        let file = Self.makeFile(
+            path: "/Library/Singles/808 State/Pacific 0101/track.flac",
+            artistRoot: "/Library/Singles/808 State", title: "Pacific 0101")
+
+        #expect(CollectionPlanner.plan(for: [file]).isEmpty)
+    }
+
+    @Test func reRunningPlannerOnItsOwnOutputProposesNothing() throws {
+        let artistRoot = "/Library/Singles/Maxi Priest"
+        let original = Self.makeFile(
+            path: "\(artistRoot)/1990 - Close To You [12'' Promo Single]/Maxi Priest - Close To You.mp3",
+            artistRoot: artistRoot, title: "Close To You", artist: "Maxi Priest")
+
+        let firstProposal = try #require(CollectionPlanner.plan(for: [original]).first?.proposals.first)
+        #expect(firstProposal.proposedRelativePath == "Close To You/1990 - 12'' Promo Single/Maxi Priest - Close To You.mp3")
+
+        let organized = Self.makeFile(
+            path: "\(artistRoot)/\(firstProposal.proposedRelativePath)",
+            artistRoot: artistRoot, title: "Close To You", artist: "Maxi Priest")
+        #expect(CollectionPlanner.plan(for: [organized]).isEmpty)
+    }
+
+    // MARK: - Rule 6: name clashes
+
+    @Test func nameClashAppendsTheOtherPressingNameRatherThanOverwriting() throws {
+        // Both pressings reduce to "nothing left" (rule 2), so both land
+        // directly in the song folder under their original filename —
+        // the second one has to be disambiguated rather than overwrite the
+        // first.
+        let fileA = Self.makeFile(
+            path: "/Library/Singles/TestArtist/Common Song -/track.mp3",
+            artistRoot: "/Library/Singles/TestArtist", title: "Common Song", artist: "TestArtist")
+        let fileB = Self.makeFile(
+            path: "/Library/Singles/TestArtist/TestArtist - Common Song/track.mp3",
+            artistRoot: "/Library/Singles/TestArtist", title: "Common Song", artist: "TestArtist")
+
+        let proposals = try #require(CollectionPlanner.plan(for: [fileA, fileB]).first).proposals
+        #expect(proposals.count == 2)
+
+        let first = try #require(proposals.first { $0.file.url == fileA.url })
+        #expect(first.proposedRelativePath == "Common Song/track.mp3")
+
+        let second = try #require(proposals.first { $0.file.url == fileB.url })
+        #expect(second.proposedFileName == "track (TestArtist - Common Song).mp3")
+        #expect(second.proposedRelativePath == "Common Song/track (TestArtist - Common Song).mp3")
     }
 
     // MARK: - Fixture
 
     private static func makeFile(
         path: String,
+        artistRoot: String,
         title: String?,
-        category: LibraryCategory,
-        artist: String? = "Artist"
+        category: LibraryCategory = .singles,
+        artist: String? = nil
     ) -> AudioFile {
         let url = URL(fileURLWithPath: path)
+        let rootComponents = URL(fileURLWithPath: artistRoot).standardizedFileURL.pathComponents
+        let fileComponents = url.standardizedFileURL.pathComponents
+        let relativeComponents = Array(fileComponents.dropFirst(rootComponents.count))
+        // A loose file sits directly in the artist root (one component left:
+        // its own filename) — anything nested has a folder name to report.
+        let expectedArtist = relativeComponents.count > 1 ? relativeComponents.first : nil
+
         return AudioFile(
             url: url,
             fileName: url.lastPathComponent,
@@ -105,7 +217,7 @@ struct CollectionPlannerTests {
             genre: "Electronic",
             trackNumber: nil,
             category: category,
-            expectedArtist: "Artist",
+            expectedArtist: expectedArtist,
             isReadable: true
         )
     }

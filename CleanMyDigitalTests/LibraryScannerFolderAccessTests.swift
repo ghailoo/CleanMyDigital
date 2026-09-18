@@ -84,8 +84,13 @@ struct LibraryScannerFolderAccessTests {
         let file = try #require(scanner.files.first)
 
         let proposal = CollectionProposal(
-            file: file, releaseFolderName: "Some Release", proposedRelativePath: "Some Release/track.mp3")
-        let results = await scanner.collectIntoFolders([proposal])
+            file: file, songTitle: "Some Release", pressingName: nil,
+            proposedFileName: "track.mp3", proposedRelativePath: "Some Release/track.mp3",
+            hasOddExtension: false)
+        let plan = ArtistCollectionPlan(
+            artistFolderName: folder.lastPathComponent, artistRoot: folder,
+            proposals: [proposal], sourceFoldersToClean: [])
+        let results = await scanner.collectIntoFolders([plan])
 
         let result = try #require(results.first)
         #expect(!result.succeeded)
