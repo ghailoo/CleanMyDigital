@@ -108,6 +108,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var sortOrder = [KeyPathComparator(\AudioFile.fileName)]
     @State private var selection: Set<AudioFile.ID> = []
+    @State private var showInspector = false
     @State private var metadataLookupFile: AudioFile?
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
     @AppStorage("discogsToken") private var discogsToken = ""
@@ -143,6 +144,16 @@ struct ContentView: View {
         .consistentAnimation(scanner.state)
         .frame(minWidth: 800, minHeight: 500)
         .toolbar { toolbarContent }
+        .inspector(isPresented: $showInspector) {
+            TrackInspectorView(
+                files: scanner.files.filter { selection.contains($0.id) },
+                scanner: scanner
+            ) { file in
+                metadataLookupInitialProvider = .discogs
+                metadataLookupFile = file
+            }
+            .inspectorColumnWidth(min: 260, ideal: 300, max: 440)
+        }
         .labelStyle(.titleAndIcon)
         .searchable(text: $searchText, prompt: "Search file, title, artist, album")
         // Singles are commonly filed one folder per artist, so several can
@@ -742,6 +753,12 @@ struct ContentView: View {
             organizeMenu
             checkControl
             exportMenu
+        }
+
+        ToolbarItem {
+            Button("Info", systemImage: "info.circle") { showInspector.toggle() }
+                .keyboardShortcut("i", modifiers: .command)
+                .help("Show or hide track info and tag editing (⌘I)")
         }
     }
 

@@ -67,12 +67,31 @@ struct FLACTagWriterTests {
         var replace = TagChanges()
         replace.title = "Should Never Appear"
         replace.album = "Turn Da Music Up"
-        replace.replacesAlbum = true
+        replace.replacing = [.album]
         try FLACTagWriter.write(replace, to: flacURL)
 
         let metadata = try await Self.allMetadata(of: AVURLAsset(url: flacURL))
         #expect(await Self.stringValue(.commonIdentifierAlbumName, in: metadata) == "Turn Da Music Up")
         #expect(await Self.stringValue(.commonIdentifierTitle, in: metadata) == "Keep Me")
+    }
+
+    @Test func replacesAnyEditedFieldButLeavesOthers() async throws {
+        let flacURL = try Self.makeTestFLAC()
+        defer { try? FileManager.default.removeItem(at: flacURL) }
+
+        var firstWrite = TagChanges()
+        firstWrite.title = "Old Title"
+        firstWrite.genre = "House"
+        try FLACTagWriter.write(firstWrite, to: flacURL)
+
+        var edit = TagChanges()
+        edit.title = "New Title"
+        edit.genre = "Should Stay House"
+        edit.replacing = [.title]
+        try FLACTagWriter.write(edit, to: flacURL)
+
+        let metadata = try await Self.allMetadata(of: AVURLAsset(url: flacURL))
+        #expect(await Self.stringValue(.commonIdentifierTitle, in: metadata) == "New Title")
     }
 
     @Test func addsAFrontCoverPictureBlock() async throws {

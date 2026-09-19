@@ -69,11 +69,15 @@ enum WAVTagWriter {
             fields.append((id: id, value: value))
         }
 
+        let ids: [(MetadataField, String)] = [
+            (.title, infoTitle), (.artist, infoArtist), (.album, infoAlbum),
+            (.year, infoYear), (.genre, infoGenre), (.trackNumber, infoTrackNumber),
+        ]
+        for (field, id) in ids where changes.replaces(field) {
+            fields.removeAll { $0.id == id }
+        }
         addIfMissing(infoTitle, changes.title)
         addIfMissing(infoArtist, changes.artist)
-        if changes.replacesAlbum, changes.album?.isEmpty == false {
-            fields.removeAll { $0.id == infoAlbum }
-        }
         addIfMissing(infoAlbum, changes.album)
         addIfMissing(infoYear, changes.year)
         addIfMissing(infoGenre, changes.genre)

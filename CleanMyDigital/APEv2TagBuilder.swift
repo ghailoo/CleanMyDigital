@@ -40,11 +40,15 @@ enum APEv2TagBuilder {
             items.append(APEv2Tag.Item(key: key, isBinary: false, valueBytes: Array(value.utf8)))
         }
 
+        let keys: [(MetadataField, String)] = [
+            (.title, titleKey), (.artist, artistKey), (.album, albumKey),
+            (.year, yearKey), (.genre, genreKey), (.trackNumber, trackKey),
+        ]
+        for (field, key) in keys where changes.replaces(field) {
+            items.removeAll { $0.key.caseInsensitiveCompare(key) == .orderedSame }
+        }
         addTextIfMissing(titleKey, changes.title)
         addTextIfMissing(artistKey, changes.artist)
-        if changes.replacesAlbum, changes.album?.isEmpty == false {
-            items.removeAll { $0.key.caseInsensitiveCompare(albumKey) == .orderedSame }
-        }
         addTextIfMissing(albumKey, changes.album)
         addTextIfMissing(yearKey, changes.year)
         addTextIfMissing(genreKey, changes.genre)

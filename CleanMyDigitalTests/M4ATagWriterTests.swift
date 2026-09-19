@@ -101,7 +101,7 @@ struct M4ATagWriterTests {
 
         var replace = TagChanges()
         replace.album = "Dreams (Will Come Alive)"
-        replace.replacesAlbum = true
+        replace.replacing = [.album]
         try await M4ATagWriter.write(replace, to: m4aURL)
 
         let metadata = try await AVURLAsset(url: m4aURL).load(.metadata)

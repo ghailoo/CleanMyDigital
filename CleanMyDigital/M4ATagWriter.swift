@@ -67,22 +67,22 @@ enum M4ATagWriter {
 
         var newItems: [AVMetadataItem] = []
 
-        if let title = changes.title, !hasTitle {
+        if let title = changes.title, !hasTitle || changes.replaces(.title) {
             newItems.append(stringItem(.iTunesMetadataSongName, title))
         }
-        if let artist = changes.artist, !hasArtist {
+        if let artist = changes.artist, !hasArtist || changes.replaces(.artist) {
             newItems.append(stringItem(.iTunesMetadataArtist, artist))
         }
-        if let album = changes.album, !hasAlbum || changes.replacesAlbum {
+        if let album = changes.album, !hasAlbum || changes.replaces(.album) {
             newItems.append(stringItem(.iTunesMetadataAlbum, album))
         }
-        if let year = changes.year, !hasYear {
+        if let year = changes.year, !hasYear || changes.replaces(.year) {
             newItems.append(stringItem(.iTunesMetadataReleaseDate, year))
         }
-        if let genre = changes.genre, !hasGenre {
+        if let genre = changes.genre, !hasGenre || changes.replaces(.genre) {
             newItems.append(stringItem(.iTunesMetadataUserGenre, genre))
         }
-        if let trackNumber = changes.trackNumber, !hasTrackNumber {
+        if let trackNumber = changes.trackNumber, !hasTrackNumber || changes.replaces(.trackNumber) {
             let (part, total) = TagWriteHelpers.parseTrackPosition(trackNumber)
             // The `trkn` iTunes atom is packed binary: 2 bytes padding,
             // 2 bytes track number, 2 bytes total tracks, 2 bytes padding.

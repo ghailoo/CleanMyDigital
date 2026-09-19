@@ -26,24 +26,24 @@ enum ID3TagBuilder {
 
         func isNew(_ name: FrameName) -> Bool { existingFrames[name] == nil }
 
-        if let title = changes.title, isNew(.title) {
+        if let title = changes.title, isNew(.title) || changes.replaces(.title) {
             builder.title(frame: ID3FrameWithStringContent(content: title))
         }
-        if let artist = changes.artist, isNew(.artist) {
+        if let artist = changes.artist, isNew(.artist) || changes.replaces(.artist) {
             builder.artist(frame: ID3FrameWithStringContent(content: artist))
         }
         // Re-setting the frame replaces the preserved one on the builder.
-        if let album = changes.album, isNew(.album) || changes.replacesAlbum {
+        if let album = changes.album, isNew(.album) || changes.replaces(.album) {
             builder.album(frame: ID3FrameWithStringContent(content: album))
         }
-        if let year = changes.year, isNew(.recordingYear),
+        if let year = changes.year, isNew(.recordingYear) || changes.replaces(.year),
            let yearValue = Int(year.trimmingCharacters(in: .whitespaces)) {
             builder.recordingYear(frame: ID3FrameWithIntegerContent(value: yearValue))
         }
-        if let genre = changes.genre, isNew(.genre) {
+        if let genre = changes.genre, isNew(.genre) || changes.replaces(.genre) {
             builder.genre(frame: ID3FrameGenre(genre: nil, description: genre))
         }
-        if let trackNumber = changes.trackNumber, isNew(.trackPosition) {
+        if let trackNumber = changes.trackNumber, isNew(.trackPosition) || changes.replaces(.trackNumber) {
             let (part, total) = TagWriteHelpers.parseTrackPosition(trackNumber)
             builder.trackPosition(frame: ID3FramePartOfTotal(part: part, total: total))
         }

@@ -763,7 +763,7 @@ struct ApplyFoundMatchesSheetView: View {
                 if removeFormatSuffixes, changes.album == nil,
                    let cleaned = MetadataQuery.strippingFormatSuffix(from: file.album) {
                     changes.album = cleaned
-                    changes.replacesAlbum = true
+                    changes.replacing = [.album]
                 }
                 guard !changes.isEmpty else {
                     outcomesByURL[file.url] = .alreadyComplete

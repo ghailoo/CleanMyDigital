@@ -17,10 +17,29 @@ struct TagChanges: Sendable {
     var genre: String?
     var trackNumber: String?
     var artworkJPEG: Data?
-    /// The one exception to "only fill empty fields": when true, `album`
-    /// replaces an existing Album value. Only set by the user's explicit
-    /// "Remove format suffixes" choice in Apply Found Matches.
-    var replacesAlbum = false
+    /// The exceptions to "only fill empty fields": these fields replace an
+    /// existing value. Only ever set by an explicit user action — a manual
+    /// edit in the track inspector, or "Remove format suffixes" (Album).
+    var replacing: Set<MetadataField> = []
+
+    /// A text field's new value, if it's being written and non-empty.
+    func value(for field: MetadataField) -> String? {
+        let value: String? = switch field {
+        case .title: title
+        case .artist: artist
+        case .album: album
+        case .year: year
+        case .genre: genre
+        case .trackNumber: trackNumber
+        default: nil
+        }
+        return value?.isEmpty == false ? value : nil
+    }
+
+    /// Whether `field` should overwrite an existing value.
+    func replaces(_ field: MetadataField) -> Bool {
+        replacing.contains(field) && value(for: field) != nil
+    }
 
     var isEmpty: Bool {
         title == nil && artist == nil && album == nil && year == nil

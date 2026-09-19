@@ -441,6 +441,40 @@ final class LibraryScanner {
     /// of the operation — access extends to the whole subtree the folder
     /// covers, including this file.
     @discardableResult
+    /// Full-size cover art for the track inspector — scanning keeps only a
+    /// 64px thumbnail. Same readers as `inspect`: DSF/WavPack natively,
+    /// everything else AVFoundation first, then the native FLAC/WAV/AIFF
+    /// reader where AVFoundation finds nothing.
+    func fullArtwork(for file: AudioFile) async -> NSImage? {
+        guard let accessed = beginAccessToAllRoots() else { return nil }
+        defer { endAccess(accessed) }
+        let url = file.url
+        let ext = url.pathExtension.lowercased()
+        var data: Data?
+        switch ext {
+        case "dsf": data = (try? DSFMetadataReader.read(contentsOf: url))?.metadata.artworkData
+        case "wv": data = (try? WavPackMetadataReader.read(contentsOf: url))?.metadata.artworkData
+        default:
+            let asset = AVURLAsset(url: url)
+            var items = (try? await asset.load(.commonMetadata)) ?? []
+            for format in (try? await asset.load(.availableMetadataFormats)) ?? [] {
+                items += (try? await asset.loadMetadata(for: format)) ?? []
+            }
+            for item in AVMetadataItem.metadataItems(from: items, filteredByIdentifier: .commonIdentifierArtwork) {
+                if let bytes = try? await item.load(.dataValue), !bytes.isEmpty { data = bytes; break }
+            }
+            if data == nil {
+                switch ext {
+                case "flac": data = (try? FLACMetadataReader.read(contentsOf: url))?.artworkData
+                case "wav", "wave": data = (try? RIFFMetadataReader.read(contentsOf: url))?.artworkData
+                case "aif", "aiff", "aifc": data = (try? AIFFMetadataReader.read(contentsOf: url))?.artworkData
+                default: break
+                }
+            }
+        }
+        return data.flatMap(NSImage.init(data:))
+    }
+
     func applyTagChanges(_ changes: TagChanges, to file: AudioFile, backupFirst: Bool) async throws -> TagWriteError? {
         guard let fileRoot = root(containing: file.url) else {
             throw TagWriteError.underlying(CocoaError(.fileNoSuchFile))
