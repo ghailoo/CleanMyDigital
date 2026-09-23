@@ -20,3 +20,4 @@ mistral-src/
 .claude/skills/
 .claude/settings.local.json
 skills-lock.json
+graphify-out/
