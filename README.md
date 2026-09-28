@@ -5,6 +5,32 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.2
+
+- **Track info panel (⌘I).** A side panel showing the selected track's cover art and
+  details, where you can **edit tags directly** — Title, Artist, Album, Year, Genre,
+  Track. Select several tracks and shared values appear once; anything you type
+  applies to all of them. This is the one place existing tags are overwritten, and
+  only the fields you change.
+- **Release organizer.** "Collect into Folders" now builds
+  `Artist / Song / Pressing` folders: every version of a song lands in one folder,
+  with each pressing as its own subfolder, covers and scans alongside their tracks.
+  Different spellings ("Justified & Ancient" / "And Ancient") merge, and a folder
+  holding more than four different songs is left alone, so albums and compilations
+  aren't broken up.
+- **Monkey's Audio (.ape) support** — read, tag, rename and collect, same as the
+  other formats.
+- **Better matching.** Searches now ignore "feat." credits (including "féat."),
+  scene tags like "-gem", and invisible characters in filenames. A result by the
+  right artist counts as a match instead of a warning.
+- **Progress you can see and stop**, with a live count of matches found.
+- **Keyboard:** ⌘O choose folder, ⌘R rescan, ⌘I info panel, ⌘F search, Esc closes a
+  window, Return runs its main action.
+- **Fix:** .m4a files showed Year and Genre as missing when they weren't, and then
+  failed to apply with "nothing to write".
+
+---
+
 ## What's new in 1.1
 
 - **Apply Found Matches, redesigned.** Each file is a card with a one-line
