@@ -724,6 +724,7 @@ struct ContentView: View {
             Button("Choose Folder…", systemImage: "folder") {
                 showFolderPicker = true
             }
+            .keyboardShortcut("o", modifiers: .command)
             .help(selectedCategory == .singles
                   ? "Choose one or more folders to scan — Singles can span several artist folders"
                   : "Choose a folder to scan")
@@ -790,6 +791,7 @@ struct ContentView: View {
             .help(needsScanHelp("Re-read the scanned folders from disk"))
         } else {
             Button("Rescan", systemImage: "arrow.clockwise") { rescanCurrentFolders() }
+                .keyboardShortcut("r", modifiers: .command)
                 .disabled(!canRescan)
                 .help(needsScanHelp("Re-read the scanned folders from disk"))
         }

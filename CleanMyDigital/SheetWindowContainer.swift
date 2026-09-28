@@ -83,6 +83,9 @@ struct SheetWindowContainer<Content: View, Footer: View>: View {
             }
             Spacer()
             Button("Done") { dismissWindow(id: windowID) }
+                // Esc closes the window, the macOS convention for a
+                // review window that writes nothing by itself.
+                .keyboardShortcut(.cancelAction)
         }
         .padding()
     }

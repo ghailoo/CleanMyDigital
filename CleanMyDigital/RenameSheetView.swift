@@ -87,8 +87,11 @@ struct RenameSheetView: View {
                 Button("Undo Last Change") { Task { await undo() } }
                     .disabled(isBusy)
             }
+            if isBusy { ProgressView().controlSize(.small) }
             Button("Rename Selected") { Task { await rename() } }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
                 .disabled(selection.isEmpty || isBusy)
         }
         .padding()

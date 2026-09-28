@@ -697,6 +697,7 @@ struct ApplyFoundMatchesSheetView: View {
             Button("Apply Selected Matches") { Task { await applySelected() } }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
                 .disabled(selection.isEmpty || isApplying)
         }
         .padding(.horizontal)

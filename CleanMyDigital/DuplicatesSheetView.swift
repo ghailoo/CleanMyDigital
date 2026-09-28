@@ -125,8 +125,11 @@ struct DuplicatesSheetView: View {
                 Button("Undo Last Change") { Task { await undo() } }
                     .disabled(isBusy)
             }
+            if isBusy { ProgressView().controlSize(.small) }
             Button("Move Selected to Review Folder") { Task { await moveSelected() } }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
                 .disabled(selection.isEmpty || isBusy)
         }
         .padding()

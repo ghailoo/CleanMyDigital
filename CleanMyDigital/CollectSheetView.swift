@@ -98,8 +98,11 @@ struct CollectSheetView: View {
                 Button("Undo Last Change") { Task { await undo() } }
                     .disabled(isBusy)
             }
+            if isBusy { ProgressView().controlSize(.small) }
             Button("Collect Selected") { Task { await collect() } }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
                 .disabled(selectedArtists.isEmpty || isBusy)
         }
         .padding()
