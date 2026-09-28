@@ -111,6 +111,54 @@ struct CollectionPlannerTests {
                           "Been Around/Adeva - Been Around (Triple S Mix).flac"])
     }
 
+    // MARK: - One folder per song, albums skipped
+
+    /// The KLF case: the same song spelled differently across pressings must
+    /// land in one folder, not two.
+    @Test func titleSpellingVariantsShareOneSongFolder() {
+        let amp = Self.makeFile(
+            path: "/Library/Singles/The KLF/1991 - Justified & Ancient (CDM) (Germany)/01 Justified & Ancient.flac",
+            artistRoot: "/Library/Singles/The KLF", title: "Justified & Ancient", artist: "The KLF")
+        let and = Self.makeFile(
+            path: "/Library/Singles/The KLF/The KLF - Justified And Ancient (US CDM) (1992)/01 Justified And Ancient.flac",
+            artistRoot: "/Library/Singles/The KLF", title: "Justified And Ancient", artist: "The KLF")
+        let question = Self.makeFile(
+            path: "/Library/Singles/The KLF/1989 - What Time Is Love/01 What Time Is Love?.flac",
+            artistRoot: "/Library/Singles/The KLF", title: "What Time Is Love?", artist: "The KLF")
+        let plain = Self.makeFile(
+            path: "/Library/Singles/The KLF/1990 - What Time Is Love (Power Remix) (CDM)/01 What Time Is Love.flac",
+            artistRoot: "/Library/Singles/The KLF", title: "What Time Is Love (Power Remix)", artist: "The KLF")
+
+        let songFolders = Set(CollectionPlanner.plan(for: [amp, and, question, plain])
+            .flatMap(\.proposals).map { $0.proposedRelativePath.components(separatedBy: "/")[0] })
+        #expect(songFolders.count == 2)
+    }
+
+    /// An album folder (more than four different songs) is left untouched.
+    @Test func albumFoldersAreSkipped() {
+        let files = ["What Time Is Love? (LP Mix)", "Make It Rain", "3 A.M. Eternal (Live At The S.S.L.)",
+                     "Church Of The KLF", "Build A Fire", "The White Room"].enumerated().map { index, title in
+            Self.makeFile(
+                path: "/Library/Singles/The KLF/The KLF 1991 - The White Room v2/0\(index + 1) \(title).flac",
+                artistRoot: "/Library/Singles/The KLF", title: title, artist: "The KLF")
+        }
+
+        #expect(CollectionPlanner.plan(for: files).isEmpty)
+    }
+
+    /// Four or fewer distinct songs is still a single's release (A-side plus
+    /// B-sides), so it's collected as before.
+    @Test func aReleaseWithAFewBSidesIsStillCollected() {
+        let files = ["Last Train To Trancentral", "Last Train To Trancentral (Dub)", "Techno Trance"]
+            .map { title in
+                Self.makeFile(
+                    path: "/Library/Singles/The KLF/1991 - Last Train To Trancentral (CDM)/\(title).flac",
+                    artistRoot: "/Library/Singles/The KLF", title: title, artist: "The KLF")
+            }
+
+        #expect(CollectionPlanner.plan(for: files).flatMap(\.proposals).count == 3)
+    }
+
     // MARK: - Rule 8: idempotency
 
     @Test func alreadyOrganizedWithPressingProposesNothing() {

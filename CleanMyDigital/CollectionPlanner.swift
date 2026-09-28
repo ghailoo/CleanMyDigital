@@ -79,6 +79,7 @@ enum CollectionPlanner {
         let bySourceFolder = Dictionary(grouping: artistFiles, by: \.expectedArtist)
 
         var planned: [Planned] = []
+
         var cleanFolders: [URL] = []
 
         for (topFolderName, groupFiles) in bySourceFolder {
@@ -92,6 +93,10 @@ enum CollectionPlanner {
             // B-sides) stays together under one song folder — picked by
             // whichever title the original folder name names, since that's
             // the release's actual A-side.
+            // An album or compilation, not a single's pressings: leave it alone.
+            let distinctSongs = Set(titled.map { songKey($0.title) })
+            guard distinctSongs.count <= maxDistinctSongsPerRelease else { continue }
+
             let distinctTitles = Array(Set(titled.map(\.title)))
             let groupSongTitle: String
             if distinctTitles.count == 1 {
@@ -152,7 +157,64 @@ enum CollectionPlanner {
             }
         }
 
+        planned = canonicalizingSongTitles(planned)
         return (finalizedProposals(for: planned, artistRoot: artistRoot), cleanFolders.sorted { $0.path < $1.path })
+    }
+
+    /// Above this many genuinely different songs, a folder is an album or a
+    /// compilation rather than one single's pressings, so it's skipped whole.
+    /// ponytail: a plain count; no tracklist/duration analysis.
+    private static let maxDistinctSongsPerRelease = 4
+
+    /// Title spellings that differ only in case, punctuation, accents or
+    /// "&" vs "and" are the same song: "Justified & Ancient" /
+    /// "Justified And Ancient", "What Time Is Love?" / "What Time Is Love".
+    static func songKey(_ title: String) -> String {
+        let folded = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .replacingOccurrences(of: "&", with: " and ")
+        let kept = folded.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+        return String(kept).split(separator: " ").joined(separator: " ")
+    }
+
+    /// One folder per song, however each file spells it: every variant of a
+    /// song key gets the same folder name. An existing song-level folder
+    /// wins (so re-runs don't rename it); otherwise the most common
+    /// spelling, then the shortest, then alphabetical — deterministic, so
+    /// the same library always produces the same folder.
+    private static func canonicalizingSongTitles(_ planned: [Planned]) -> [Planned] {
+        var existingFolderName: [String: String] = [:]
+        for entry in planned where entry.topFolderName != nil {
+            let key = songKey(entry.songTitle)
+            // Exact match only: a folder that merely *reduces* to the same key
+            // ("Common Song -") isn't an organized song folder.
+            if let top = entry.topFolderName, top == entry.songTitle, existingFolderName[key] == nil {
+                existingFolderName[key] = top
+            }
+        }
+
+        var counts: [String: [String: Int]] = [:]
+        for entry in planned {
+            counts[songKey(entry.songTitle), default: [:]][entry.songTitle, default: 0] += 1
+        }
+
+        var canonical: [String: String] = [:]
+        for (key, variants) in counts {
+            if let existing = existingFolderName[key] {
+                canonical[key] = existing
+                continue
+            }
+            canonical[key] = variants.sorted {
+                if $0.value != $1.value { return $0.value > $1.value }
+                if $0.key.count != $1.key.count { return $0.key.count < $1.key.count }
+                return $0.key < $1.key
+            }.first?.key
+        }
+
+        return planned.map { entry in
+            guard let name = canonical[songKey(entry.songTitle)], name != entry.songTitle else { return entry }
+            return Planned(file: entry.file, songTitle: name,
+                           pressingName: entry.pressingName, topFolderName: entry.topFolderName)
+        }
     }
 
     /// Resolves destinations and rule 6 (never overwrite — append the
