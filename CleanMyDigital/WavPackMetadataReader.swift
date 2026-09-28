@@ -26,7 +26,7 @@ enum WavPackMetadataReader {
 
         var result = Result()
         if let located {
-            merge(items: located.items, into: &result.metadata)
+            APEv2TagBuilder.fill(&result.metadata, from: located.items)
         }
 
         // Duration is only computable from the very first block in the
@@ -66,18 +66,4 @@ enum WavPackMetadataReader {
         return result
     }
 
-    private static func merge(items: [APEv2Tag.Item], into metadata: inout NativeAudioMetadata) {
-        metadata.title = APEv2TagBuilder.textValue(APEv2TagBuilder.titleKey, in: items)
-        metadata.artist = APEv2TagBuilder.textValue(APEv2TagBuilder.artistKey, in: items)
-        metadata.album = APEv2TagBuilder.textValue(APEv2TagBuilder.albumKey, in: items)
-        metadata.year = APEv2TagBuilder.textValue(APEv2TagBuilder.yearKey, in: items)
-        metadata.genre = APEv2TagBuilder.textValue(APEv2TagBuilder.genreKey, in: items)
-        metadata.trackNumber = APEv2TagBuilder.textValue(APEv2TagBuilder.trackKey, in: items)
-
-        if let coverItem = items.first(where: {
-            $0.key.caseInsensitiveCompare(APEv2TagBuilder.coverArtFrontKey) == .orderedSame
-        }), let payload = coverItem.coverArtPayload {
-            metadata.artworkData = payload.data
-        }
-    }
 }

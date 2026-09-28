@@ -61,6 +61,23 @@ enum APEv2TagBuilder {
         return items
     }
 
+    /// Fills the shared native-metadata shape from APEv2 items — used by
+    /// every APEv2-tagged format (WavPack, Monkey's Audio).
+    static func fill(_ metadata: inout NativeAudioMetadata, from items: [APEv2Tag.Item]) {
+        metadata.title = APEv2TagBuilder.textValue(APEv2TagBuilder.titleKey, in: items)
+        metadata.artist = APEv2TagBuilder.textValue(APEv2TagBuilder.artistKey, in: items)
+        metadata.album = APEv2TagBuilder.textValue(APEv2TagBuilder.albumKey, in: items)
+        metadata.year = APEv2TagBuilder.textValue(APEv2TagBuilder.yearKey, in: items)
+        metadata.genre = APEv2TagBuilder.textValue(APEv2TagBuilder.genreKey, in: items)
+        metadata.trackNumber = APEv2TagBuilder.textValue(APEv2TagBuilder.trackKey, in: items)
+
+        if let coverItem = items.first(where: {
+            $0.key.caseInsensitiveCompare(APEv2TagBuilder.coverArtFrontKey) == .orderedSame
+        }), let payload = coverItem.coverArtPayload {
+            metadata.artworkData = payload.data
+        }
+    }
+
     /// Looks up a text field by key, case-insensitively — shared by
     /// `WavPackMetadataReader` so its reading and this builder's
     /// never-overwrite check agree on what "already present" means.

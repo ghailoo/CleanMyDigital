@@ -120,7 +120,7 @@ enum TagWriterRouter {
     /// FLAC, MP3, M4A, WAV, AIFF, DSF, and WavPack are the formats
     /// CleanMyDigital can write to today. Everything else stays read-only.
     private static let writableExtensions: Set<String> = [
-        "flac", "mp3", "m4a", "wav", "wave", "aif", "aiff", "aifc", "dsf", "wv",
+        "flac", "mp3", "m4a", "wav", "wave", "aif", "aiff", "aifc", "dsf", "wv", "ape",
     ]
 
     nonisolated static func canWrite(fileExtension: String) -> Bool {
@@ -142,6 +142,8 @@ enum TagWriterRouter {
             try AIFFTagWriter.write(changes, to: url)
         case "dsf":
             try DSFTagWriter.write(changes, to: url)
+        case "ape":
+            try APETagWriter.write(changes, to: url)
         case "wv":
             try WavPackTagWriter.write(changes, to: url)
         default:

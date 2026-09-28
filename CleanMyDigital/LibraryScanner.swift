@@ -150,18 +150,17 @@ final class LibraryScanner {
     /// `AVFoundationErrorDomain` code -11828, "file format not
     /// recognized", not just for unusual files).
     nonisolated static let nativeOnlyExtensions: Set<String> = [
-        "dsf", "wv",
+        "dsf", "wv", "ape",
     ]
 
     /// Audio formats we recognize but can't read at all yet —
     /// reported as unreadable so they still get flagged.
     ///
-    /// `.ape` (Monkey's Audio) uses the same APEv2 tag format as WavPack
-    /// (see `APEv2Tag.swift`, written format-agnostic for exactly this
-    /// reason) — adding it here would mostly be container work (locating
-    /// where its audio ends), not another tag parser.
+    /// `.ape` (Monkey's Audio) is no longer here: it carries the same
+    /// APEv2 tag as WavPack, so it reads and writes through
+    /// `APEMetadataReader`/`APETagWriter` (see `nativeOnlyExtensions`).
     nonisolated static let unsupportedAudioExtensions: Set<String> = [
-        "ogg", "oga", "opus", "wma", "ape", "mpc", "dff",
+        "ogg", "oga", "opus", "wma", "mpc", "dff",
     ]
 
     var progress: Double {
@@ -1265,6 +1264,12 @@ final class LibraryScanner {
             switch ext {
             case "dsf":
                 if let r = try? DSFMetadataReader.read(contentsOf: url) {
+                    result = (r.metadata, r.duration, r.bitrateKbps)
+                } else {
+                    result = nil
+                }
+            case "ape":
+                if let r = try? APEMetadataReader.read(contentsOf: url) {
                     result = (r.metadata, r.duration, r.bitrateKbps)
                 } else {
                     result = nil

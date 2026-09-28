@@ -146,9 +146,9 @@ their compiler rather than "Various" — searching by title finds those too.
 
 | | Formats |
 |---|---|
-| **Read and write** | MP3, M4A, FLAC, WAV, AIFF, DSF, WavPack (.wv) |
+| **Read and write** | MP3, M4A, FLAC, WAV, AIFF, DSF, WavPack (.wv), Monkey's Audio (.ape) |
 | **Read only** | M4B, M4P, AAC, CAF, MP4, ALAC, AC3, EAC3 |
-| **Not supported yet** | OGG, Opus, WMA, Monkey's Audio (.ape), MPC, DFF |
+| **Not supported yet** | OGG, Opus, WMA, MPC, DFF |
 
 Unsupported files still appear in the results, flagged as unreadable, rather than
 being silently skipped.
