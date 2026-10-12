@@ -123,10 +123,12 @@ struct DuplicatesSheetView: View {
             Spacer()
             if scanner.canUndoLastFileOperation {
                 Button("Undo Last Change") { Task { await undo() } }
+                    .accessibilityHint("Reverts the most recent rename, move, or collect")
                     .disabled(isBusy)
             }
             if isBusy { ProgressView().controlSize(.small) }
             Button("Move Selected to Review Folder") { Task { await moveSelected() } }
+                .accessibilityHint("Moves the selected copies into a review subfolder; nothing is deleted")
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)

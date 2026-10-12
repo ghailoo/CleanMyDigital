@@ -267,6 +267,7 @@ struct ApplyFoundMatchesSheetView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .accessibilityHint("Re-searches the whole \(albumGroup.category == .compilations ? "compilation" : "album") on Discogs")
                 }
             }
             // Albums/Compilations only — every file in the folder found this
@@ -380,6 +381,7 @@ struct ApplyFoundMatchesSheetView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .accessibilityHint("Re-searches this one file")
             }
 
             if let found {
@@ -695,6 +697,7 @@ struct ApplyFoundMatchesSheetView: View {
                 .disabled(isApplying)
             if isApplying { ProgressView().controlSize(.small) }
             Button("Apply Selected Matches") { Task { await applySelected() } }
+                .accessibilityHint("Writes the selected matches' fields into the files' tags")
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)

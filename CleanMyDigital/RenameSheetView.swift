@@ -85,10 +85,12 @@ struct RenameSheetView: View {
             Spacer()
             if scanner.canUndoLastFileOperation {
                 Button("Undo Last Change") { Task { await undo() } }
+                    .accessibilityHint("Reverts the most recent rename, move, or collect")
                     .disabled(isBusy)
             }
             if isBusy { ProgressView().controlSize(.small) }
             Button("Rename Selected") { Task { await rename() } }
+                .accessibilityHint("Renames the selected files on disk to their proposed names")
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)

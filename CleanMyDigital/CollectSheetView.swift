@@ -96,10 +96,12 @@ struct CollectSheetView: View {
             Spacer()
             if scanner.canUndoLastFileOperation {
                 Button("Undo Last Change") { Task { await undo() } }
+                    .accessibilityHint("Reverts the most recent rename, move, or collect")
                     .disabled(isBusy)
             }
             if isBusy { ProgressView().controlSize(.small) }
             Button("Collect Selected") { Task { await collect() } }
+                .accessibilityHint("Moves the selected artists' loose files into per-release folders")
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)

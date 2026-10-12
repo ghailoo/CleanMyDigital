@@ -16,6 +16,7 @@ struct CleanMyDigitalApp: App {
             ContentView(scanner: scanner)
         }
         .windowResizability(.contentMinSize)
+        .commands { LibraryCommands() }
 
         WindowGroup("Rename Files", id: "rename-files") {
             RenameSheetView(scanner: scanner)
@@ -49,6 +50,39 @@ struct CleanMyDigitalApp: App {
 
         Settings {
             SettingsView()
+        }
+    }
+}
+
+/// Menu-bar home for the main window's toolbar shortcuts, so ⌘O/⌘R/⌘I are
+/// discoverable without hovering a toolbar button. The state stays in
+/// `ContentView`, published per window via `.focusedSceneValue`.
+extension FocusedValues {
+    @Entry var chooseFolder: (() -> Void)?
+    @Entry var rescan: (() -> Void)?
+    @Entry var showInspector: Binding<Bool>?
+}
+
+struct LibraryCommands: Commands {
+    @FocusedValue(\.chooseFolder) private var chooseFolder
+    @FocusedValue(\.rescan) private var rescan
+    @FocusedValue(\.showInspector) private var showInspector
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("Choose Folder…") { chooseFolder?() }
+                .keyboardShortcut("o", modifiers: .command)
+                .disabled(chooseFolder == nil)
+            Button("Rescan") { rescan?() }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(rescan == nil)
+        }
+        CommandGroup(after: .toolbar) {
+            Button(showInspector?.wrappedValue == true ? "Hide Track Info" : "Show Track Info") {
+                showInspector?.wrappedValue.toggle()
+            }
+            .keyboardShortcut("i", modifiers: .command)
+            .disabled(showInspector == nil)
         }
     }
 }

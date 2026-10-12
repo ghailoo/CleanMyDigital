@@ -201,6 +201,7 @@ struct AlbumCompletenessSheetView: View {
             Spacer()
             if scanner.canUndoLastFileOperation {
                 Button("Undo Last Change") { Task { await undo() } }
+                    .accessibilityHint("Reverts the most recent rename, move, or collect")
                     .disabled(isRenamingFolder)
             }
         }

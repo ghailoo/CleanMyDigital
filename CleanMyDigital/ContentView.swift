@@ -144,6 +144,12 @@ struct ContentView: View {
         .consistentAnimation(scanner.state)
         .frame(minWidth: 800, minHeight: 500)
         .toolbar { toolbarContent }
+        // Feeds the File/View menu commands in `CleanMyDigitalApp`. Nil
+        // disables the menu item: no folder picking until the launch
+        // category prompt is answered, no rescan without a scan.
+        .focusedSceneValue(\.chooseFolder, chooseFolderCommand)
+        .focusedSceneValue(\.rescan, rescanCommand)
+        .focusedSceneValue(\.showInspector, $showInspector)
         .inspector(isPresented: $showInspector) {
             TrackInspectorView(
                 files: scanner.files.filter { selection.contains($0.id) },
@@ -220,7 +226,7 @@ struct ContentView: View {
         VStack(spacing: 28) {
             VStack(spacing: 10) {
                 Image(systemName: "waveform.badge.magnifyingglass")
-                    .font(.system(size: 32))
+                    .font(.largeTitle)
                     .foregroundStyle(.secondary)
                 Text("What are you scanning?")
                     .font(.title2.weight(.semibold))
@@ -724,10 +730,9 @@ struct ContentView: View {
             Button("Choose Folder…", systemImage: "folder") {
                 showFolderPicker = true
             }
-            .keyboardShortcut("o", modifiers: .command)
             .help(selectedCategory == .singles
-                  ? "Choose one or more folders to scan — Singles can span several artist folders"
-                  : "Choose a folder to scan")
+                  ? "Choose one or more folders to scan — Singles can span several artist folders (⌘O)"
+                  : "Choose a folder to scan (⌘O)")
             rescanControl
         }
 
@@ -742,12 +747,16 @@ struct ContentView: View {
             }
             .disabled(!scanner.isLookingUp && !canFindAllMetadata)
             .help(findAllMetadataHelp)
+            .accessibilityHint(scanner.isLookingUp
+                               ? "Stops the batch lookup — matches found so far are kept"
+                               : "Searches Discogs and MusicBrainz for every flagged file's missing metadata")
 
             Button("Apply Found Matches…", systemImage: "checkmark.circle") {
                 openWindow(id: "apply-found-matches")
             }
             .disabled(!canApplyFoundMatches)
             .help(applyFoundMatchesHelp)
+            .accessibilityHint("Opens a review of each file's found match before writing it")
         }
 
         ToolbarItemGroup {
@@ -758,7 +767,6 @@ struct ContentView: View {
 
         ToolbarItem {
             Button("Info", systemImage: "info.circle") { showInspector.toggle() }
-                .keyboardShortcut("i", modifiers: .command)
                 .help("Show or hide track info and tag editing (⌘I)")
         }
     }
@@ -788,12 +796,11 @@ struct ContentView: View {
             }
             .menuIndicator(.visible)
             .disabled(!canRescan)
-            .help(needsScanHelp("Re-read the scanned folders from disk"))
+            .help(needsScanHelp("Re-read the scanned folders from disk (⌘R)"))
         } else {
             Button("Rescan", systemImage: "arrow.clockwise") { rescanCurrentFolders() }
-                .keyboardShortcut("r", modifiers: .command)
                 .disabled(!canRescan)
-                .help(needsScanHelp("Re-read the scanned folders from disk"))
+                .help(needsScanHelp("Re-read the scanned folders from disk (⌘R)"))
         }
     }
 
@@ -848,6 +855,14 @@ struct ContentView: View {
         }
         .disabled(scanner.files.isEmpty)
         .help(needsScanHelp("Copy the results as text, or export them as a CSV file"))
+    }
+
+    private var chooseFolderCommand: (() -> Void)? {
+        showCategoryPrompt ? nil : { showFolderPicker = true }
+    }
+
+    private var rescanCommand: (() -> Void)? {
+        canRescan ? { rescanCurrentFolders() } : nil
     }
 
     private var canRescan: Bool {
@@ -1012,11 +1027,21 @@ private struct CSVDocument: FileDocument {
 
 /// Deepened shades for badge text — legible on their own 15%-opacity tint,
 /// unlike the flat system colors (`.green` text on `.green.opacity(0.15)`
-/// reads as washed-out and low-contrast).
+/// reads as washed-out and low-contrast). In Dark Mode that tint sits on a
+/// dark background, where the same deep shades sink into it, so each has a
+/// lighter, slightly more saturated dark variant instead.
 private extension Color {
-    static let qualityGood = Color(red: 0.11, green: 0.50, blue: 0.18)
-    static let qualityWarning = Color(red: 0.68, green: 0.40, blue: 0.02)
-    static let qualityBad = Color(red: 0.68, green: 0.14, blue: 0.14)
+    static let qualityGood = adaptive(light: (0.11, 0.50, 0.18), dark: (0.36, 0.85, 0.44))
+    static let qualityWarning = adaptive(light: (0.68, 0.40, 0.02), dark: (1.00, 0.72, 0.22))
+    static let qualityBad = adaptive(light: (0.68, 0.14, 0.14), dark: (1.00, 0.45, 0.42))
+
+    static func adaptive(light: (CGFloat, CGFloat, CGFloat), dark: (CGFloat, CGFloat, CGFloat)) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let (r, g, b) = isDark ? dark : light
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+        })
+    }
 }
 
 private extension Optional where Wrapped == String {
@@ -1153,6 +1178,7 @@ private struct JobProgressPill: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .help(stopHelp)
+                .accessibilityHint(stopHelp)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
