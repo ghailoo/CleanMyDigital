@@ -5,6 +5,31 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.3
+
+- **Is it really lossless?** *Check ▸ Check Quality of All Files* (or right-click
+  selected files ▸ *Check Quality*) grades every file **Lossless**, **Medium** or
+  **Fake**, the same way the Spectro app does: it looks for the hard frequency
+  ceiling an MP3/AAC encoder leaves behind, which converting to FLAC or WAV can't
+  undo. The grade appears in the **Quality** column, with the reason in its tooltip.
+  - **Lossless** — full-range audio, as expected from a real lossless file.
+  - **Medium** — honestly lossy (MP3/AAC), or a lossless file with thin highs, or a
+    hi-res file that's really CD quality.
+  - **Fake** — a lossy file dressed up as lossless, or a low-bitrate MP3.
+- **Finder colour dots.** Each checked file gets a green, yellow or red dot in Finder.
+  This only adds a colour label; the audio is not touched.
+- **Pause** the check from its progress bar, and resume where it left off.
+- **Spectrogram** of the selected track in the info panel (⌘I), with the measured
+  cutoff marked.
+- **Fake filter** in the summary row, and **Organize ▸ Move All Fakes to
+  Quarantine…**, which moves them into a `_CleanMyDigital Quarantine` folder (with
+  Undo). Nothing is deleted.
+- **Find Duplicates keeps the best-sounding copy**: Lossless beats Medium beats Fake,
+  so a genuine MP3 is kept over a fake FLAC.
+- **Fix:** AIFF files couldn't be measured at all.
+
+---
+
 ## What's new in 1.2
 
 - **Track info panel (⌘I).** A side panel showing the selected track's cover art and
@@ -215,17 +240,22 @@ Preview before applying.
 a subfolder named after the release.
 
 **Find Duplicates…** — groups files sharing the same Artist and Title, keeps the
-highest real quality (measured frequency cutoff first, then bitrate), and offers to
-move the rest into a `_CleanMyDigital Duplicates` folder. Nothing is ever deleted.
+highest real quality (Lossless over Medium over Fake, then measured frequency cutoff,
+then bitrate), and offers to move the rest into a `_CleanMyDigital Duplicates`
+folder. Nothing is ever deleted.
+
+**Move All Fakes to Quarantine…** — after a quality check, moves every Fake file into
+a `_CleanMyDigital Quarantine` folder inside its scanned folder. Asks first; Undo
+puts them back. Nothing is ever deleted.
 
 ### Check — everything here only reads and reports
 
 **Check Album Completeness…** *(Albums only)* — see below.
 
-**Check for Transcodes** — measures each file's real frequency cutoff. A file
-claiming to be lossless but cutting off below ~17 kHz was probably re-encoded from
-a lower-quality source. Results appear in the Cutoff column. While it runs, this
-menu becomes a **Stop** button.
+**Check Quality of All Files** — grades each file Lossless, Medium or Fake from its
+real frequency content (see *What's new in 1.3*). Results appear in the Quality
+column and as Finder colour dots. Right-click selected files ▸ **Check Quality** to
+check only those. While it runs, the progress bar has **Pause** and **Stop**.
 
 ### Export
 
