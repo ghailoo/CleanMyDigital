@@ -91,8 +91,11 @@ enum RIFFStream {
             && String(decoding: chunk.data[0..<4], as: UTF8.self).uppercased() == "INFO"
     }
 
+    /// "id3 " is the usual ID, but some taggers write "ID32" — missing it
+    /// meant a write added a second ID3 chunk beside the old one, leaving
+    /// players to pick whichever tag they read first.
     static func isID3Chunk(_ chunk: RIFFChunk) -> Bool {
-        chunk.id.trimmingCharacters(in: .whitespaces).lowercased() == "id3"
+        ["id3", "id32"].contains(chunk.id.trimmingCharacters(in: .whitespaces).lowercased())
     }
 
     /// Parses a LIST/INFO chunk's sub-chunks (4-char ID + NUL-terminated

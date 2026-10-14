@@ -82,6 +82,29 @@ struct WAVTagWriterTests {
         #expect((id3Tag.frames[.artist] as? ID3FrameWithStringContent)?.content == "New WAV Artist")
     }
 
+    @Test func updatesAnExistingID32ChunkInsteadOfAddingASecondID3Chunk() throws {
+        let wavURL = try Self.makeTestWAV()
+        defer { try? FileManager.default.removeItem(at: wavURL) }
+
+        // Some taggers name the chunk "ID32" rather than "id3 ".
+        var genreOnly = TagChanges()
+        genreOnly.genre = "Tech House"
+        let id3Data = try ID3TagEditor().write(tag: ID3TagBuilder.build(changes: genreOnly, existing: nil), mp3: Data())
+        var chunks = try RIFFStream.parseChunks(in: [UInt8](try Data(contentsOf: wavURL)))
+        chunks.append(RIFFChunk(id: "ID32", data: [UInt8](id3Data)))
+        try RIFFStream.buildFile(chunks: chunks).write(to: wavURL, options: .atomic)
+
+        var changes = TagChanges()
+        changes.album = "New Album"
+        try WAVTagWriter.write(changes, to: wavURL)
+
+        let newChunks = try RIFFStream.parseChunks(in: [UInt8](try Data(contentsOf: wavURL)))
+        #expect(newChunks.filter { RIFFStream.isID3Chunk($0) }.map(\.id) == ["ID32"])
+        let id3Tag = try #require(try Self.id3Tag(of: wavURL))
+        #expect((id3Tag.frames[.genre] as? ID3FrameGenre)?.description == "Tech House")
+        #expect((id3Tag.frames[.album] as? ID3FrameWithStringContent)?.content == "New Album")
+    }
+
     @Test func preservesAudioBytesAndOtherChunksExactly() throws {
         let wavURL = try Self.makeTestWAV()
         defer { try? FileManager.default.removeItem(at: wavURL) }
