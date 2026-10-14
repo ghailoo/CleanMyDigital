@@ -39,6 +39,27 @@ struct SpectralCutoffAnalyzerTests {
         #expect(value < 18000)
     }
 
+    @Test func bandLimitedSignalShowsBrickwall() throws {
+        // Dense content up to 16kHz, nothing above: a lossy lowpass shape.
+        let sampleRate = 44100.0
+        let frequencies = stride(from: 500.0, through: 16000.0, by: 250.0).map { $0 }
+        let samples = Self.sineSum(frequencies: frequencies, sampleRate: sampleRate, duration: 2)
+
+        let features = try #require(SpectralCutoffAnalyzer.analyze(samples: samples, sampleRate: sampleRate))
+        #expect(features.hasBrickwall)
+        #expect(abs(features.cutoffHz - 16000) < 300)
+    }
+
+    @Test func noBrickwallWhenContentReachesNyquist() throws {
+        let sampleRate = 44100.0
+        let frequencies = stride(from: 500.0, through: 21800.0, by: 250.0).map { $0 }
+        let samples = Self.sineSum(frequencies: frequencies, sampleRate: sampleRate, duration: 2)
+
+        let features = try #require(SpectralCutoffAnalyzer.analyze(samples: samples, sampleRate: sampleRate))
+        #expect(!features.hasBrickwall)
+        #expect(features.cutoffHz > 21000)
+    }
+
     @Test func returnsNilForSilence() {
         let samples = [Float](repeating: 0, count: 44100 * 2)
         #expect(SpectralCutoffAnalyzer.highestSignificantFrequency(samples: samples, sampleRate: 44100) == nil)

@@ -224,9 +224,13 @@ struct TrackInspectorView: View {
                 detailRow("Bitrate", file.bitrateKbps.map { "\($0) kbps" } ?? "—")
                 detailRow("Length", file.formattedDuration)
                 detailRow("Size", file.formattedSize)
-                detailRow("Cutoff", cutoffText(for: file))
+                detailRow("Quality", cutoffText(for: file))
+                if case .measured(_, let verdict) = scanner.spectralResults[file.url] {
+                    detailRow("Why", verdict.reason)
+                }
                 detailRow("Lookup", lookupText(for: file))
             }
+            SpectrogramView(url: file.url, root: scanner.root(containing: file.url), cutoffHz: measuredCutoff(file))
             Text(file.url.deletingLastPathComponent().path)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -243,6 +247,11 @@ struct TrackInspectorView: View {
         }
     }
 
+    private func measuredCutoff(_ file: AudioFile) -> Double? {
+        if case .measured(let hz, _) = scanner.spectralResults[file.url] { return hz }
+        return nil
+    }
+
     private func detailRow(_ label: String, _ value: String) -> some View {
         GridRow {
             Text(label).font(.caption).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
@@ -252,7 +261,7 @@ struct TrackInspectorView: View {
 
     private func cutoffText(for file: AudioFile) -> String {
         switch scanner.spectralResults[file.url] {
-        case .measured(let hz): String(format: "%.1f kHz", hz / 1000)
+        case .measured(let hz, let verdict): String(format: "%@ · %.1f kHz", verdict.grade.label, hz / 1000)
         case .inconclusive: "Inconclusive"
         case .failed: "Couldn't measure"
         case nil: "Not checked"

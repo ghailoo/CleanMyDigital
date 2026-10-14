@@ -58,6 +58,28 @@ struct DuplicatePlannerTests {
         #expect(group.keeper.url == real.url)
     }
 
+    @Test func genuineMP3BeatsFakeFLACWhenGraded() {
+        // A transcoded FLAC has the higher bitrate and here even the
+        // higher measured cutoff; the verdict still wins.
+        let fake = Self.makeFile(path: "/Library/Singles/Artist/fake.flac", artist: "Artist", title: "Title", bitrateKbps: 900)
+        let mp3 = Self.makeFile(path: "/Library/Singles/Artist/real.mp3", artist: "Artist", title: "Title", bitrateKbps: 320)
+
+        let group = try! #require(DuplicatePlanner.groups(
+            for: [fake, mp3], cutoffHz: [fake.url: 19_800, mp3.url: 19_600],
+            grades: [fake.url: .fake, mp3.url: .medium]).first)
+        #expect(group.keeper.url == mp3.url)
+    }
+
+    @Test func quarantinePlanMirrorsPathAndSkipsAlreadyQuarantined() {
+        let root = URL(fileURLWithPath: "/Library/Singles")
+        let fake = Self.makeFile(path: "/Library/Singles/Artist/fake.flac", artist: "Artist", title: "Title")
+        let parked = Self.makeFile(path: "/Library/Singles/_CleanMyDigital Quarantine/Artist/old.flac", artist: "Artist", title: "Old")
+
+        let plan = DuplicatePlanner.quarantinePlan(for: [fake, parked], roots: [root])
+        #expect(plan.map(\.file.url) == [fake.url])
+        #expect(plan.first?.proposedRelativePath == "_CleanMyDigital Quarantine/Artist/fake.flac")
+    }
+
     @Test func unmeasuredFileIsNotPenalizedAgainstAFlaggedMeasuredFile() {
         // `measured` has a known-bad low cutoff; `unmeasured` hasn't been
         // analyzed at all but has a much higher bitrate. Falling back to

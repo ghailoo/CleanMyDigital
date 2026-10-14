@@ -8,21 +8,21 @@ import CoreMedia
 import Foundation
 
 /// The result of one file's spectral-cutoff analysis.
-enum SpectralCutoffOutcome: Sendable {
-    /// Highest frequency (Hz) with real signal energy.
-    case measured(hz: Double)
+nonisolated enum SpectralCutoffOutcome: Sendable {
+    /// Highest frequency (Hz) with real signal energy, and what that
+    /// means for this file's container and stated bitrate.
+    case measured(hz: Double, verdict: QualityVerdict)
     /// The file was too short or too quiet to measure meaningfully.
     case inconclusive
     case failed(String)
 }
 
-/// Reads a handful of representative samples from an audio file and hands
-/// them to `SpectralCutoffAnalyzer`. Decoding and FFTing an entire track
-/// for every file in a library would make this expensive to run
-/// automatically during a scan, so instead it samples three ~6-second
-/// windows from the middle of the track (skipping the first/last 10%,
-/// which are often fades or silence) — enough to reliably catch a
-/// transcode's frequency ceiling without decoding the whole file.
+/// Decodes a whole track to mono and hands it to `SpectralCutoffAnalyzer`,
+/// then grades it with `QualityVerdict` — Spectro analyzes the full track
+/// (5 segments plus a whole-track spectrum), so this does too.
+///
+/// ponytail: holds the whole decoded track in memory (~64MB for 6 min at
+/// 44.1kHz, ~4x that at 192kHz); stream the STFT if hi-res batches run hot.
 ///
 /// Decodes via `AVAssetReader` rather than `AVAudioFile` — confirmed
 /// empirically that `AVAudioFile` goes through a lower-level Core Audio
@@ -32,53 +32,41 @@ enum SpectralCutoffOutcome: Sendable {
 /// files decode fine via `AVAssetReader`, which rides the same
 /// `AVURLAsset` pipeline already used successfully elsewhere in this app
 /// for tag and duration reading.
-enum SpectralCutoffReader {
-    private static let sampleWindowSeconds = 6.0
-    private static let sampleFractions: [Double] = [0.25, 0.5, 0.75]
-
-    static func analyze(url: URL) async throws -> SpectralCutoffOutcome {
-        let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
-            return .inconclusive
-        }
-        let duration = try await asset.load(.duration).seconds
-        guard duration.isFinite, duration > 0 else { return .inconclusive }
-
-        var samples: [Float] = []
-        var sampleRate: Double?
-        for fraction in sampleFractions {
-            let start = duration * fraction
-            guard start + sampleWindowSeconds <= duration,
-                  let (windowSamples, rate) = try readPCMSamples(
-                    asset: asset, track: track, start: start, duration: sampleWindowSeconds)
-            else { continue }
-            samples.append(contentsOf: windowSamples)
-            if sampleRate == nil { sampleRate = rate }
-        }
-
-        guard !samples.isEmpty, let sampleRate,
-              let hz = SpectralCutoffAnalyzer.highestSignificantFrequency(samples: samples, sampleRate: sampleRate)
+nonisolated enum SpectralCutoffReader {
+    /// `@concurrent` so the decode + FFT run off the main actor.
+    @concurrent static func analyze(url: URL, bitrateKbps: Int?) async throws -> SpectralCutoffOutcome {
+        guard let (samples, sampleRate) = try await decodeMono(url: url),
+              let features = SpectralCutoffAnalyzer.analyze(samples: samples, sampleRate: sampleRate)
         else { return .inconclusive }
-        return .measured(hz: hz)
+        let verdict = QualityVerdict.classify(features, fileExtension: url.pathExtension, bitrateKbps: bitrateKbps)
+        return .measured(hz: features.cutoffHz, verdict: verdict)
     }
 
-    /// Decodes one time window to mono Float32 PCM. Requesting a single
+    /// The whole track as mono Float32 PCM and its sample rate.
+    @concurrent static func decodeMono(url: URL) async throws -> (samples: [Float], sampleRate: Double)? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return nil }
+        return try readPCMSamples(asset: asset, track: track)
+    }
+
+    /// Decodes the track to mono Float32 PCM. Requesting a single
     /// output channel lets `AVAssetReader` do the stereo-to-mono mixdown
     /// itself, and the real sample rate is read back from the delivered
     /// sample buffer's format description rather than assumed.
     private static func readPCMSamples(
-        asset: AVURLAsset, track: AVAssetTrack, start: Double, duration: Double
+        asset: AVURLAsset, track: AVAssetTrack
     ) throws -> (samples: [Float], sampleRate: Double)? {
         let reader = try AVAssetReader(asset: asset)
-        reader.timeRange = CMTimeRange(
-            start: CMTime(seconds: start, preferredTimescale: 600),
-            duration: CMTime(seconds: duration, preferredTimescale: 600))
 
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVLinearPCMIsFloatKey: true,
             AVLinearPCMBitDepthKey: 32,
             AVLinearPCMIsNonInterleaved: false,
+            // Without this an AIFF source decodes big-endian (garbage/NaN as
+            // native floats). Spectro omits it too, which is why it calls
+            // some good AIFFs Fake.
+            AVLinearPCMIsBigEndianKey: false,
             AVNumberOfChannelsKey: 1,
         ]
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)

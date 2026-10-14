@@ -161,13 +161,26 @@ doesn't block the write.
 
 ### Lossy-transcode detection
 
-- **`SpectralCutoffReader.swift`** decodes three representative windows of a track via
-  `AVAssetReader` into mono Float32 PCM.
-- **`SpectralCutoffAnalyzer.swift`** (pure, unit-testable) FFTs the samples (Accelerate/vDSP,
-  Hann-windowed) and reports the highest frequency still above the noise floor — a low-bitrate
-  lossy encode permanently discards high frequencies, so this fingerprints transcodes that
-  re-encoding to FLAC/high-bitrate MP3 can't undo.
-- Results feed both the results table (a "Cutoff" column) and `DuplicatePlanner`'s quality ranking.
+Reproduces Spectro.app's verdict (decompiled with Ghidra; 99/103 agreement on the user's files).
+
+- **`SpectralCutoffReader.swift`** decodes the whole track to mono Float32 via `AVAssetReader`
+  (explicitly little-endian — AIFF otherwise decodes as garbage).
+- **`SpectralCutoffAnalyzer.swift`** (pure) — Spectro's pipeline: 2048-pt Hann DFT, hop 1024,
+  `vDSP_vdbcon` flag 10 (20·log10 of power — Spectro's quirk; thresholds depend on it), clipped
+  -120...0. Cutoff = first 12-20kHz cliff (next 1kHz < -83 and ≥20 below the 500Hz under it),
+  else max-hold above noise floor; computed over 5 segments (quiet ones dropped) and combined.
+  Also air fraction (>-60 above 19kHz), 48k-from-44.1 detection, spectral balance.
+- **`QualityVerdict.swift`** (pure) — Spectro's decision tree → Lossless / Medium / Fake + reason.
+- Reader/analyzer/verdict are `nonisolated` (+ `@concurrent` async entry points) — the target
+  defaults to MainActor isolation, which would otherwise decode on the main thread.
+- Each graded file gets a Finder colour label (`LibraryScanner.setFinderColor`: green/yellow/red
+  via `labelNumber`). The batch can be paused (`isSpectrumPaused`, toggled from the progress pill).
+- **`SpectrogramView.swift`** — inspector spectrogram for the selected file, decoded on demand
+  via `SpectralCutoffAnalyzer.spectrogram`, with the measured cutoff as a dashed line.
+- Results feed the results table ("Quality" column, "Fake" filter), the inspector,
+  `DuplicatePlanner`'s ranking (verdict, then cutoff, then bitrate), "Check Quality" on a
+  selection, and Organize ▸ Move All Fakes to Quarantine (`_CleanMyDigital Quarantine` inside
+  each root, undoable, via `moveDuplicates`).
 
 ### UI layer
 

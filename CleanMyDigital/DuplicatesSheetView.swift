@@ -20,7 +20,7 @@ struct DuplicatesSheetView: View {
         // windows' simpler two-column lists.
         SheetWindowContainer(
             title: "Find Duplicates",
-            subtitle: "Groups files sharing the same Artist and Title. The highest real quality — Cutoff first, then Bitrate — is kept; the rest are candidates to move aside.",
+            subtitle: "Groups files sharing the same Artist and Title. The highest real quality — Lossless over Medium over Fake, then Cutoff, then Bitrate — is kept; the rest are candidates to move aside.",
             windowID: "find-duplicates",
             size: .wide
         ) {
@@ -93,7 +93,7 @@ struct DuplicatesSheetView: View {
             Text(cutoffText(for: file))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .frame(width: 72, alignment: .trailing)
+                .frame(width: 100, alignment: .trailing)
             Text(file.formattedSize)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -103,8 +103,8 @@ struct DuplicatesSheetView: View {
     }
 
     private func cutoffText(for file: AudioFile) -> String {
-        if case .measured(let hz) = scanner.spectralResults[file.url] {
-            return String(format: "%.1f kHz", hz / 1000)
+        if case .measured(let hz, let verdict) = scanner.spectralResults[file.url] {
+            return String(format: "%@ %.1fk", verdict.grade.label, hz / 1000)
         }
         return "–"
     }
@@ -155,10 +155,14 @@ struct DuplicatesSheetView: View {
 
     private func rebuildPlan() {
         var cutoffHz: [URL: Double] = [:]
+        var grades: [URL: QualityVerdict.Grade] = [:]
         for (url, outcome) in scanner.spectralResults {
-            if case .measured(let hz) = outcome { cutoffHz[url] = hz }
+            if case .measured(let hz, let verdict) = outcome {
+                cutoffHz[url] = hz
+                grades[url] = verdict.grade
+            }
         }
-        groups = DuplicatePlanner.groups(for: scanner.files, cutoffHz: cutoffHz)
+        groups = DuplicatePlanner.groups(for: scanner.files, cutoffHz: cutoffHz, grades: grades)
         selection = Set(groups.flatMap { $0.extras.map(\.url) })
         errorsByURL = [:]
     }

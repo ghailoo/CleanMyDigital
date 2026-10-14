@@ -96,6 +96,8 @@ final class LibraryScanner {
     /// — cleared whenever a new scan starts.
     private(set) var spectralResults: [URL: SpectralCutoffOutcome] = [:]
     private(set) var isAnalyzingSpectrum = false
+    /// While true the quality check starts no new files; in-flight ones finish.
+    var isSpectrumPaused = false
     private(set) var spectralCompletedCount = 0
     private(set) var spectralTotalCount = 0
 
@@ -1009,9 +1011,11 @@ final class LibraryScanner {
     /// spectrogram viewer like Spek shows visually as a hard ceiling. Runs
     /// with bounded concurrency like the initial scan, since this is
     /// CPU-bound decode+FFT work rather than a rate-limited network call.
-    func analyzeSpectrum() {
+    /// `only` limits the run to those files (the "Check Quality" action
+    /// on a selection); nil analyzes every readable file.
+    func analyzeSpectrum(only urls: Set<URL>? = nil) {
         guard !isAnalyzingSpectrum, hasScannedFolder else { return }
-        let targets = files.filter(\.isReadable)
+        let targets = files.filter { $0.isReadable && (urls?.contains($0.url) ?? true) }
         guard !targets.isEmpty else { return }
 
         spectralCompletedCount = 0
@@ -1045,7 +1049,7 @@ final class LibraryScanner {
                     group.addTask {
                         let outcome: SpectralCutoffOutcome
                         do {
-                            outcome = try await SpectralCutoffReader.analyze(url: file.url)
+                            outcome = try await SpectralCutoffReader.analyze(url: file.url, bitrateKbps: file.bitrateKbps)
                         } catch {
                             outcome = .failed(error.localizedDescription)
                         }
@@ -1062,10 +1066,16 @@ final class LibraryScanner {
                     }
                     spectralResults[url] = outcome
                     spectralCompletedCount += 1
+                    if case .measured(_, let verdict) = outcome { Self.setFinderColor(verdict.grade, on: url) }
+                    // ponytail: 250ms poll while paused; a continuation if it ever matters.
+                    while isSpectrumPaused && !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(250))
+                    }
                     addNext()
                 }
             }
             isAnalyzingSpectrum = false
+            isSpectrumPaused = false
             spectralTask = nil
         }
     }
@@ -1074,6 +1084,21 @@ final class LibraryScanner {
     /// whatever was already measured stays in `spectralResults`.
     func cancelSpectrumAnalysis() {
         spectralTask?.cancel()
+    }
+
+    /// Finder colour dot like Spectro's: red Fake, yellow Medium, green
+    /// Lossless. `labelNumber` is the locale-proof way to set a colour tag
+    /// (a "Red" tag name would be a new uncoloured tag on a French Mac).
+    /// Best effort — a volume without extended attributes just skips it.
+    nonisolated static func setFinderColor(_ grade: QualityVerdict.Grade, on url: URL) {
+        var values = URLResourceValues()
+        values.labelNumber = switch grade {
+        case .lossless: 2
+        case .medium: 5
+        case .fake: 6
+        }
+        var url = url
+        try? url.setResourceValues(values)
     }
 
     /// Searches Discogs first; only falls through to MusicBrainz if Discogs

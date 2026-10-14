@@ -34,23 +34,26 @@ struct DuplicateMoveProposal: Identifiable, Sendable {
 /// filesystem-free, like `RenamePlanner`/`CollectionPlanner`.
 enum DuplicatePlanner {
     static let reviewFolderName = "_CleanMyDigital Duplicates"
+    static let quarantineFolderName = "_CleanMyDigital Quarantine"
 
     /// Groups every file that shares an Artist + Title with at least one
     /// other file. Files missing either tag are skipped — there's nothing
     /// reliable to match them on.
-    static func groups(for files: [AudioFile], cutoffHz: [URL: Double]) -> [DuplicateGroup] {
+    static func groups(
+        for files: [AudioFile], cutoffHz: [URL: Double], grades: [URL: QualityVerdict.Grade] = [:]
+    ) -> [DuplicateGroup] {
         var buckets: [String: [AudioFile]] = [:]
         for file in files {
-            // Already parked for review by a previous run — don't flag it
-            // against its own keeper again.
-            guard !file.url.pathComponents.contains(reviewFolderName) else { continue }
+            // Already parked for review/quarantine by a previous run —
+            // don't flag it against its own keeper again.
+            guard !isParked(file) else { continue }
             guard let key = matchKey(for: file) else { continue }
             buckets[key, default: []].append(file)
         }
 
         return buckets.compactMap { key, groupFiles -> DuplicateGroup? in
             guard groupFiles.count > 1 else { return nil }
-            let sorted = groupFiles.sorted { isHigherQuality($0, than: $1, cutoffHz: cutoffHz) }
+            let sorted = groupFiles.sorted { isHigherQuality($0, than: $1, cutoffHz: cutoffHz, grades: grades) }
             return DuplicateGroup(key: key, files: sorted)
         }.sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
     }
@@ -72,17 +75,30 @@ enum DuplicatePlanner {
     /// longest matching root, so nested selections resolve to the nearest
     /// enclosing folder rather than an outer one.
     static func plan(for groups: [DuplicateGroup], roots: [URL]) -> [DuplicateMoveProposal] {
-        groups.flatMap { group in
-            group.extras.compactMap { file -> DuplicateMoveProposal? in
-                let candidates = roots.compactMap { root in
-                    relativePath(of: file.url, from: root).map { (root: root, path: $0) }
-                }
-                // Fewest components == deepest root, since a deeper root
-                // leaves a shorter path remaining below it.
-                guard let best = candidates.min(by: { $0.path.count < $1.path.count }) else { return nil }
-                return DuplicateMoveProposal(
-                    file: file, proposedRelativePath: "\(reviewFolderName)/\(best.path)")
+        moves(for: groups.flatMap(\.extras), into: reviewFolderName, roots: roots)
+    }
+
+    /// Moves every Fake file into a quarantine folder inside its own root,
+    /// same mirroring as the duplicate review folder. Files already in
+    /// quarantine (or the duplicate review folder) are left where they are.
+    static func quarantinePlan(for fakes: [AudioFile], roots: [URL]) -> [DuplicateMoveProposal] {
+        moves(for: fakes.filter { !isParked($0) }, into: quarantineFolderName, roots: roots)
+    }
+
+    private static func isParked(_ file: AudioFile) -> Bool {
+        let components = file.url.pathComponents
+        return components.contains(reviewFolderName) || components.contains(quarantineFolderName)
+    }
+
+    private static func moves(for files: [AudioFile], into folder: String, roots: [URL]) -> [DuplicateMoveProposal] {
+        files.compactMap { file -> DuplicateMoveProposal? in
+            let candidates = roots.compactMap { root in
+                relativePath(of: file.url, from: root).map { (root: root, path: $0) }
             }
+            // Fewest components == deepest root, since a deeper root
+            // leaves a shorter path remaining below it.
+            guard let best = candidates.min(by: { $0.path.count < $1.path.count }) else { return nil }
+            return DuplicateMoveProposal(file: file, proposedRelativePath: "\(folder)/\(best.path)")
         }
     }
 
@@ -98,14 +114,21 @@ enum DuplicatePlanner {
         return trimmed.lowercased()
     }
 
-    /// True if `a` should rank above `b`. Compares real spectral cutoff
+    /// True if `a` should rank above `b`. A known quality verdict wins
+    /// first (Lossless over Medium over Fake — so a genuine 320kbps MP3
+    /// beats a fake FLAC whatever its bitrate), then real spectral cutoff
     /// (actual audio bandwidth) only when *both* files have been measured
     /// — a high-bitrate file with a low measured cutoff is a transcoded
     /// fake, so cutoff should win when it's known for both. If either
     /// file hasn't been analyzed (spectral analysis is opt-in), an
     /// unmeasured file isn't penalized against a measured-but-flagged one
     /// — falls back to comparing bitrate instead.
-    private static func isHigherQuality(_ a: AudioFile, than b: AudioFile, cutoffHz: [URL: Double]) -> Bool {
+    private static func isHigherQuality(
+        _ a: AudioFile, than b: AudioFile, cutoffHz: [URL: Double], grades: [URL: QualityVerdict.Grade]
+    ) -> Bool {
+        if let gradeA = grades[a.url], let gradeB = grades[b.url], gradeA != gradeB {
+            return gradeA > gradeB
+        }
         if let cutoffA = cutoffHz[a.url], let cutoffB = cutoffHz[b.url], cutoffA != cutoffB {
             return cutoffA > cutoffB
         }

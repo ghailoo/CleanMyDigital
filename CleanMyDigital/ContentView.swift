@@ -34,6 +34,7 @@ struct ContentView: View {
         case noMetadata = "No Metadata at All"
         case complete = "Complete"
         case found = "Found"
+        case fake = "Fake"
 
         var id: String { rawValue }
     }
@@ -53,7 +54,10 @@ struct ContentView: View {
         var id: Filter { filter }
     }
 
-    static func filterStats(files: [AudioFile], lookupResults: [URL: LookupOutcome]) -> [FilterStat] {
+    static func filterStats(
+        files: [AudioFile], lookupResults: [URL: LookupOutcome],
+        spectralResults: [URL: SpectralCutoffOutcome] = [:]
+    ) -> [FilterStat] {
         [
             FilterStat(filter: .all, label: "Total", color: .secondary,
                        count: files.count),
@@ -65,20 +69,33 @@ struct ContentView: View {
                        count: files.count { !$0.hasIssues }),
             FilterStat(filter: .found, label: "Found", color: .blue,
                        count: files.count { lookupResults[$0.url]?.isFound == true }),
+            FilterStat(filter: .fake, label: "Fake", color: .red,
+                       count: files.count { isFake($0, spectralResults: spectralResults) }),
         ]
     }
 
     /// The predicate behind each `Filter` case — shared by `filteredFiles`
     /// and (indirectly, via `filterStats`' counts) the merged summary/filter
     /// row, so the two can never disagree about what a given filter means.
-    static func fileMatches(_ file: AudioFile, filter: Filter, lookupResults: [URL: LookupOutcome]) -> Bool {
+    static func fileMatches(
+        _ file: AudioFile, filter: Filter, lookupResults: [URL: LookupOutcome],
+        spectralResults: [URL: SpectralCutoffOutcome] = [:]
+    ) -> Bool {
         switch filter {
         case .all: return true
         case .issues: return file.hasIssues
         case .noMetadata: return file.hasNoMetadata
         case .complete: return !file.hasIssues
         case .found: return lookupResults[file.url]?.isFound == true
+        case .fake: return isFake(file, spectralResults: spectralResults)
         }
+    }
+
+    /// "Check for Transcodes" judged this file Fake — a lossy transcode
+    /// dressed up as lossless or as a higher bitrate.
+    static func isFake(_ file: AudioFile, spectralResults: [URL: SpectralCutoffOutcome]) -> Bool {
+        if case .measured(_, let verdict) = spectralResults[file.url] { return verdict.grade == .fake }
+        return false
     }
 
     /// The Lookup and Cutoff table columns only ever hold data once "Find
@@ -111,12 +128,16 @@ struct ContentView: View {
     @State private var showInspector = false
     @State private var metadataLookupFile: AudioFile?
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
+    @State private var showQuarantineConfirm = false
+    @State private var quarantineSummary: String?
+    @State private var quarantineMovedCount = 0
     @AppStorage("discogsToken") private var discogsToken = ""
     @AppStorage("musicBrainzContact") private var musicBrainzContact = ""
 
     private var filteredFiles: [AudioFile] {
         var result = scanner.files
-        result = result.filter { Self.fileMatches($0, filter: filter, lookupResults: scanner.lookupResults) }
+        result = result.filter { Self.fileMatches(
+            $0, filter: filter, lookupResults: scanner.lookupResults, spectralResults: scanner.spectralResults) }
         if !searchText.isEmpty {
             result = result.filter {
                 $0.fileName.localizedCaseInsensitiveContains(searchText)
@@ -173,6 +194,24 @@ struct ContentView: View {
                       allowsMultipleSelection: selectedCategory == .singles) { result in
             if case .success(let urls) = result, !urls.isEmpty {
                 Task { await scanner.scan(folders: urls, category: selectedCategory) }
+            }
+        }
+        .confirmationDialog(
+            "Move \(pluralized(fakeFiles.count, "Fake file")) to quarantine?",
+            isPresented: $showQuarantineConfirm
+        ) {
+            Button("Move to Quarantine") { Task { await quarantineFakes() } }
+        } message: {
+            Text("Each file moves into a \"\(DuplicatePlanner.quarantineFolderName)\" folder inside its scanned folder. Nothing is deleted, and you can undo.")
+        }
+        .alert(quarantineSummary ?? "", isPresented: Binding(
+            get: { quarantineSummary != nil }, set: { if !$0 { quarantineSummary = nil } }
+        )) {
+            Button("OK") {}
+            // Only offer Undo for this move; with nothing moved it would
+            // revert whatever file operation came before.
+            if quarantineMovedCount > 0 {
+                Button("Undo") { Task { _ = await scanner.undoLastFileOperation() } }
             }
         }
         .fileExporter(isPresented: $showCSVExporter,
@@ -410,7 +449,8 @@ struct ContentView: View {
     /// picking it from a menu used to be.
     private var summaryBar: some View {
         HStack(spacing: 6) {
-            ForEach(Self.filterStats(files: scanner.files, lookupResults: scanner.lookupResults)) { item in
+            ForEach(Self.filterStats(
+                files: scanner.files, lookupResults: scanner.lookupResults, spectralResults: scanner.spectralResults)) { item in
                 FilterStatButton(item: item, isSelected: filter == item.filter) { filter = item.filter }
             }
             Spacer()
@@ -424,11 +464,13 @@ struct ContentView: View {
                 .transition(.opacity)
             }
             if scanner.isAnalyzingSpectrum {
+                @Bindable var scanner = scanner
                 JobProgressPill(
-                    title: "Checking for transcodes",
+                    title: scanner.isSpectrumPaused ? "Quality check paused" : "Checking quality",
                     completed: scanner.spectralCompletedCount, total: scanner.spectralTotalCount,
                     detail: nil,
-                    stopHelp: "Stop the spectral analysis — cutoffs measured so far are kept"
+                    stopHelp: "Stop the quality check — grades so far are kept",
+                    isPaused: $scanner.isSpectrumPaused
                 ) { scanner.cancelSpectrumAnalysis() }
                 .transition(.opacity)
             }
@@ -492,26 +534,19 @@ struct ContentView: View {
         }
     }
 
-    /// Frequencies still real above this are "full range" — below it,
-    /// mirrors the well-known ~16kHz ceiling a 128kbps lossy encode
-    /// leaves behind even after being re-encoded into something that
-    /// claims to be higher quality.
-    private static let suspiciousCutoffThresholdHz = 17000.0
-
     @ViewBuilder
     private func spectralCutoffCell(for file: AudioFile) -> some View {
         switch scanner.spectralResults[file.url] {
-        case .measured(let hz):
-            let isLow = hz < Self.suspiciousCutoffThresholdHz
-            qualityBadge(String(format: "%.1f kHz", hz / 1000), color: isLow ? .qualityWarning : .qualityGood,
-                         tooltip: isLow
-                            ? "Frequencies above ~\(Int(hz / 1000))kHz are missing — likely re-encoded from a lower-bitrate source"
-                            : "Full-range audio up to ~\(Int(hz / 1000))kHz")
-                // Suspicious vs. full-range is carried by colour alone in
-                // the badge; the label states it outright.
+        case .measured(let hz, let verdict):
+            let color: Color = switch verdict.grade {
+            case .lossless: .qualityGood
+            case .medium: .qualityWarning
+            case .fake: .qualityBad
+            }
+            qualityBadge(String(format: "%@ %.1fk", verdict.grade.label, hz / 1000), color: color,
+                         tooltip: verdict.reason)
                 .accessibilityLabel(
-                    String(format: "Cutoff %.1f kilohertz, %@", hz / 1000,
-                           isLow ? "likely transcoded" : "full range"))
+                    String(format: "%@, cutoff %.1f kilohertz. %@", verdict.grade.label, hz / 1000, verdict.reason))
         case .inconclusive:
             Text("–").foregroundStyle(.tertiary).help("Too short or quiet to measure")
                 .accessibilityLabel("Cutoff not measurable — too short or quiet")
@@ -626,10 +661,10 @@ struct ContentView: View {
             .width(82)
 
             if Self.showsCutoffColumn(spectralResults: scanner.spectralResults) {
-                TableColumn("Cutoff") { file in
+                TableColumn("Quality") { file in
                     spectralCutoffCell(for: file)
                 }
-                .width(82)
+                .width(110)
             }
             TableColumn("Length", value: \.formattedDuration).width(60)
             TableColumn("Size", value: \.formattedSize).width(80)
@@ -645,6 +680,8 @@ struct ContentView: View {
                     metadataLookupFile = file
                 }
             }
+            Button("Check Quality (Lossless or Fake)") { scanner.analyzeSpectrum(only: ids) }
+                .disabled(scanner.isAnalyzingSpectrum)
         } primaryAction: { ids in
             NSWorkspace.shared.activateFileViewerSelecting(Array(ids))
         }
@@ -829,6 +866,9 @@ struct ContentView: View {
                 Button("Collect into Folders…") { openWindow(id: "collect-into-folders") }
             }
             Button("Find Duplicates…") { openWindow(id: "find-duplicates") }
+            Divider()
+            Button("Move All Fakes to Quarantine…") { showQuarantineConfirm = true }
+                .disabled(fakeFiles.isEmpty)
         } label: {
             Label("Organize", systemImage: "folder.badge.gearshape")
         }
@@ -850,13 +890,28 @@ struct ContentView: View {
                 if selectedCategory == .albums {
                     Button("Check Album Completeness…") { openWindow(id: "check-album-completeness") }
                 }
-                Button("Check for Transcodes") { scanner.analyzeSpectrum() }
+                Button("Check Quality of All Files") { scanner.analyzeSpectrum() }
             } label: {
                 Label("Check", systemImage: "checklist")
             }
             .disabled(scanner.files.isEmpty)
             .help(needsScanHelp("Check the scanned files for missing tracks or transcoded audio"))
         }
+    }
+
+    /// Files judged Fake that aren't already parked in quarantine.
+    private var fakeFiles: [AudioFile] {
+        let fakes = scanner.files.filter { Self.isFake($0, spectralResults: scanner.spectralResults) }
+        return DuplicatePlanner.quarantinePlan(for: fakes, roots: scanner.scannedFolders).map(\.file)
+    }
+
+    private func quarantineFakes() async {
+        let proposals = DuplicatePlanner.quarantinePlan(for: fakeFiles, roots: scanner.scannedFolders)
+        let results = await scanner.moveDuplicates(proposals)
+        let failed = results.count { $0.errorDescription != nil }
+        quarantineMovedCount = results.count - failed
+        quarantineSummary = "Moved \(pluralized(quarantineMovedCount, "file")) to quarantine"
+            + (failed > 0 ? ", \(failed) failed" : "")
     }
 
     private var exportMenu: some View {
@@ -1167,6 +1222,8 @@ private struct JobProgressPill: View {
     let total: Int
     let detail: String?
     let stopHelp: String
+    /// Non-nil adds a Pause/Resume toggle bound to this flag.
+    var isPaused: Binding<Bool>? = nil
     let stop: () -> Void
 
     var body: some View {
@@ -1189,6 +1246,15 @@ private struct JobProgressPill: View {
             // Label and bar read as one stop; Stop stays its own button.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(title), \(completed) of \(total)\(detail.map { ", \($0)" } ?? "")")
+            if let isPaused {
+                let paused = isPaused.wrappedValue
+                Button(paused ? "Resume" : "Pause",
+                       systemImage: paused ? "play.circle.fill" : "pause.circle.fill") { isPaused.wrappedValue.toggle() }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help(paused ? "Resume checking" : "Pause after the files in progress finish")
+            }
             Button("Stop", systemImage: "stop.circle.fill", action: stop)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
