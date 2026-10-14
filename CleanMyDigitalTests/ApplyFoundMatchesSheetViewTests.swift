@@ -188,3 +188,18 @@ struct ApplyFoundMatchesSheetViewTests {
         )
     }
 }
+
+struct ApplyFoundMatchesWritabilityTests {
+    @Test func formatsTheAppCannotWriteAreNotSelectable() {
+        #expect(!ApplyFoundMatchesSheetView.isWritable(Self.file("Rad&co - Feel Busy.ogg", ext: "ogg")))
+        #expect(ApplyFoundMatchesSheetView.isWritable(Self.file("Told You.wav", ext: "wav")))
+        #expect(ApplyFoundMatchesSheetView.isWritable(Self.file("Track.ape", ext: "ape")))
+    }
+
+    private static func file(_ name: String, ext: String) -> AudioFile {
+        AudioFile(url: URL(fileURLWithPath: "/Music/\(name)"), fileName: name, fileExtension: ext,
+                  sizeBytes: 1, duration: nil, bitrateKbps: nil, title: nil, artist: nil, album: nil,
+                  artworkThumbnail: nil, year: nil, genre: nil, trackNumber: nil,
+                  category: .singles, expectedArtist: nil, isReadable: true)
+    }
+}

@@ -251,3 +251,38 @@ struct WAVTagWriterTests {
         return jpeg
     }
 }
+
+/// Field case: WAVs whose last chunk's size field runs past the end of the
+/// file (interrupted download, or a rip whose `data` size was written before
+/// recording finished). Every player reads these; the app used to reject the
+/// whole file with "Truncated RIFF chunk", hiding its tags and blocking writes.
+struct TruncatedRIFFTests {
+    @Test func clampsAFinalChunkThatOverrunsTheFile() throws {
+        var bytes = Array("RIFF".utf8)
+        bytes += [0, 0, 0, 0]
+        bytes += Array("WAVE".utf8)
+        bytes += Array("data".utf8)
+        bytes += [0x00, 0x10, 0x00, 0x00]          // claims 4096 bytes…
+        bytes += [UInt8](repeating: 0xAB, count: 100)  // …but only 100 are here
+
+        let chunks = try RIFFStream.parseChunks(in: bytes)
+        #expect(chunks.count == 1)
+        #expect(chunks.first?.id == "data")
+        #expect(chunks.first?.data.count == 100)
+    }
+
+    @Test func rebuildingWritesAnHonestSizeField() throws {
+        var bytes = Array("RIFF".utf8)
+        bytes += [0, 0, 0, 0]
+        bytes += Array("WAVE".utf8)
+        bytes += Array("data".utf8)
+        bytes += [0x00, 0x10, 0x00, 0x00]
+        bytes += [UInt8](repeating: 0xAB, count: 100)
+
+        let rebuilt = [UInt8](RIFFStream.buildFile(chunks: try RIFFStream.parseChunks(in: bytes)))
+        let reparsed = try RIFFStream.parseChunks(in: rebuilt)
+        #expect(reparsed.first?.data.count == 100)
+        // The audio bytes survive the repair untouched.
+        #expect(reparsed.first?.data.allSatisfy { $0 == 0xAB } == true)
+    }
+}

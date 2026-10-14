@@ -95,13 +95,24 @@ struct ApplyFoundMatchesSheetView: View {
         scanner.files.filter { scanner.lookupResults[$0.url]?.isFound == true }
     }
 
+    /// A match for a format this app can't write (.ogg today) is still worth
+    /// showing — it says what the file is — but it can't be selected or
+    /// applied, since every attempt would just fail in the apply run.
+    static func isWritable(_ file: AudioFile) -> Bool {
+        TagWriterRouter.canWrite(fileExtension: file.fileExtension)
+    }
+
+    private var writableTargets: [AudioFile] {
+        targets.filter(Self.isWritable)
+    }
+
     /// Recomputed live alongside `targets`, same reasoning.
     private var groups: [FoundMatchGroup] {
         FoundMatchPlanner.groups(targets: targets, albumGroups: AlbumCompletenessChecker.groups(for: scanner.files))
     }
 
     private var selectedTargets: [AudioFile] {
-        targets.filter { selection.contains($0.url) }
+        writableTargets.filter { selection.contains($0.url) }
     }
 
     var body: some View {
@@ -305,9 +316,12 @@ struct ApplyFoundMatchesSheetView: View {
 
     private func sectionSelectionBinding(for group: FoundMatchGroup) -> Binding<Bool> {
         Binding(
-            get: { group.files.allSatisfy { selection.contains($0.url) } },
+            get: {
+                let selectable = group.files.filter(Self.isWritable)
+                return !selectable.isEmpty && selectable.allSatisfy { selection.contains($0.url) }
+            },
             set: { isOn in
-                for file in group.files {
+                for file in group.files where Self.isWritable(file) {
                     if isOn { selection.insert(file.url) } else { selection.remove(file.url) }
                 }
             }
@@ -361,6 +375,9 @@ struct ApplyFoundMatchesSheetView: View {
                 Toggle("", isOn: selectionBinding(for: file.url))
                     .labelsHidden()
                     .accessibilityLabel("Select \(file.fileName)")
+                    .disabled(!Self.isWritable(file))
+                    .help(Self.isWritable(file)
+                          ? "" : "CleanMyDigital can't write tags to this format yet")
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.fileName)
@@ -682,7 +699,7 @@ struct ApplyFoundMatchesSheetView: View {
     private var footer: some View {
         HStack {
             Text(Self.footerStatusText(
-                isApplying: isApplying, selectedCount: selection.count, targetCount: targets.count,
+                isApplying: isApplying, selectedCount: selection.count, targetCount: writableTargets.count,
                 completed: applyCompletedCount, total: applyTotalCount))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -738,7 +755,7 @@ struct ApplyFoundMatchesSheetView: View {
     /// deselected stays that way; a file that's gone (applied, or
     /// resolved by a correction) is simply dropped.
     private func syncSelection() {
-        let currentURLs = Set(targets.map(\.url))
+        let currentURLs = Set(writableTargets.map(\.url))
         let newURLs = currentURLs.subtracting(knownTargetURLs)
         selection.formIntersection(currentURLs)
         selection.formUnion(newURLs)

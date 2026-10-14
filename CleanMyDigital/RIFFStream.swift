@@ -35,12 +35,17 @@ enum RIFFStream {
             let size = Int(bytes[offset + 4]) | Int(bytes[offset + 5]) << 8
                 | Int(bytes[offset + 6]) << 16 | Int(bytes[offset + 7]) << 24
             let dataStart = offset + 8
-            let dataEnd = dataStart + size
-            guard size >= 0, dataEnd <= bytes.count else {
-                throw TagWriteError.malformedFile("Truncated RIFF chunk")
-            }
-            chunks.append(RIFFChunk(id: id, data: Array(bytes[dataStart..<dataEnd])))
-            offset = dataEnd + (size % 2 == 1 ? 1 : 0)
+            // A size field that runs past the end of the file is common in
+            // the wild — an interrupted download, or a rip whose `data`
+            // size was written before recording finished. Players just read
+            // what's there, so the chunk is clamped to the bytes that exist
+            // instead of failing the whole file (which hid its tags and
+            // blocked every write). Rebuilding on write restores a correct
+            // size field; the audio bytes are copied unchanged.
+            let available = max(0, bytes.count - dataStart)
+            let length = min(size, available)
+            chunks.append(RIFFChunk(id: id, data: Array(bytes[dataStart..<(dataStart + length)])))
+            offset = dataStart + length + (length % 2 == 1 ? 1 : 0)
         }
         return chunks
     }
