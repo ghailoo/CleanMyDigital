@@ -85,6 +85,7 @@ struct ApplyFoundMatchesSheetView: View {
     @State private var metadataLookupFile: AudioFile?
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
     @State private var albumLookupGroup: AlbumGroup?
+    @FocusState private var listFocused: Bool
 
     /// Every scanned file with a `.found` batch-lookup outcome, in table
     /// order. Recomputed live, so a file drops off this list the moment
@@ -131,6 +132,7 @@ struct ApplyFoundMatchesSheetView: View {
             footer
         }
         .onAppear { syncSelection() }
+        .onDisappear { AudioPreview.shared.stop() }
         .onChange(of: scanner.lookupCompletedCount) { syncSelection() }
         .sheet(item: $metadataLookupFile) { file in
             MetadataLookupView(file: file, scanner: scanner, initialProvider: metadataLookupInitialProvider)
@@ -207,6 +209,19 @@ struct ApplyFoundMatchesSheetView: View {
                         }
                         .padding(.bottom, Metrics.outerPadding)
                     }
+                    // Cards have no single "selected row" (the checkboxes are
+                    // the apply selection), so Space toggles the last card
+                    // previewed — the one being judged by ear.
+                    .focusable()
+                    .focusEffectDisabled()
+                    .focused($listFocused)
+                    .onKeyPress(.space) {
+                        guard let url = AudioPreview.shared.lastURL,
+                              targets.contains(where: { $0.url == url }) else { return .ignored }
+                        AudioPreview.shared.toggle(url, root: scanner.root(containing: url))
+                        return .handled
+                    }
+                    .onAppear { listFocused = true }
                 }
             }
         }
@@ -378,6 +393,8 @@ struct ApplyFoundMatchesSheetView: View {
                     .disabled(!Self.isWritable(file))
                     .help(Self.isWritable(file)
                           ? "" : "CleanMyDigital can't write tags to this format yet")
+
+                PreviewButton(url: file.url, root: scanner.root(containing: file.url))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.fileName)

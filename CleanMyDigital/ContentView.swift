@@ -566,9 +566,12 @@ struct ContentView: View {
             // column below with no width constraint, which otherwise loses
             // every fight for space against the fixed-width columns.
             TableColumn("File", value: \.fileName) { file in
-                Text(file.fileName)
-                    .truncationMode(.middle)
-                    .help(file.url.path(percentEncoded: false))
+                HStack(spacing: 6) {
+                    PreviewButton(url: file.url, root: scanner.root(containing: file.url))
+                    Text(file.fileName)
+                        .truncationMode(.middle)
+                        .help(file.url.path(percentEncoded: false))
+                }
             }
             .width(min: 160, ideal: 260)
 
@@ -645,6 +648,19 @@ struct ContentView: View {
         } primaryAction: { ids in
             NSWorkspace.shared.activateFileViewerSelecting(Array(ids))
         }
+        // Space previews the selected row; moving the selection off the
+        // playing file stops it — same feel as VinylHarmonicMix's matches view.
+        .onKeyPress(.space) {
+            guard selection.count == 1, let url = selection.first else { return .ignored }
+            AudioPreview.shared.toggle(url, root: scanner.root(containing: url))
+            return .handled
+        }
+        .onChange(of: selection) {
+            if let playing = AudioPreview.shared.playingURL, !selection.contains(playing) {
+                AudioPreview.shared.stop()
+            }
+        }
+        .onDisappear { AudioPreview.shared.stop() }
     }
 
     private func statusSymbol(for file: AudioFile) -> String {
