@@ -27,28 +27,28 @@ enum ID3TagBuilder {
         func isNew(_ name: FrameName) -> Bool { existingFrames[name] == nil }
 
         if let title = changes.title, isNew(.title) || changes.replaces(.title) {
-            builder.title(frame: ID3FrameWithStringContent(content: title))
+            _ = builder.title(frame: ID3FrameWithStringContent(content: title))
         }
         if let artist = changes.artist, isNew(.artist) || changes.replaces(.artist) {
-            builder.artist(frame: ID3FrameWithStringContent(content: artist))
+            _ = builder.artist(frame: ID3FrameWithStringContent(content: artist))
         }
         // Re-setting the frame replaces the preserved one on the builder.
         if let album = changes.album, isNew(.album) || changes.replaces(.album) {
-            builder.album(frame: ID3FrameWithStringContent(content: album))
+            _ = builder.album(frame: ID3FrameWithStringContent(content: album))
         }
         if let year = changes.year, isNew(.recordingYear) || changes.replaces(.year),
            let yearValue = Int(year.trimmingCharacters(in: .whitespaces)) {
-            builder.recordingYear(frame: ID3FrameWithIntegerContent(value: yearValue))
+            _ = builder.recordingYear(frame: ID3FrameWithIntegerContent(value: yearValue))
         }
         if let genre = changes.genre, isNew(.genre) || changes.replaces(.genre) {
-            builder.genre(frame: ID3FrameGenre(genre: nil, description: genre))
+            _ = builder.genre(frame: ID3FrameGenre(genre: nil, description: genre))
         }
         if let trackNumber = changes.trackNumber, isNew(.trackPosition) || changes.replaces(.trackNumber) {
             let (part, total) = TagWriteHelpers.parseTrackPosition(trackNumber)
-            builder.trackPosition(frame: ID3FramePartOfTotal(part: part, total: total))
+            _ = builder.trackPosition(frame: ID3FramePartOfTotal(part: part, total: total))
         }
         if let artworkJPEG = changes.artworkJPEG, isNew(.attachedPicture(.frontCover)) {
-            builder.attachedPicture(
+            _ = builder.attachedPicture(
                 pictureType: .frontCover,
                 frame: ID3FrameAttachedPicture(picture: artworkJPEG, type: .frontCover, format: .jpeg))
         }
@@ -60,100 +60,100 @@ enum ID3TagBuilder {
     private static func preserve(name: FrameName, frame: ID3Frame, on builder: ID32v3TagBuilder) {
         switch name {
         case .title:
-            if let f = frame as? ID3FrameWithStringContent { builder.title(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.title(frame: f) }
         case .album:
-            if let f = frame as? ID3FrameWithStringContent { builder.album(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.album(frame: f) }
         case .albumArtist:
-            if let f = frame as? ID3FrameWithStringContent { builder.albumArtist(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.albumArtist(frame: f) }
         case .artist:
-            if let f = frame as? ID3FrameWithStringContent { builder.artist(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.artist(frame: f) }
         case .composer:
-            if let f = frame as? ID3FrameWithStringContent { builder.composer(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.composer(frame: f) }
         case .conductor:
-            if let f = frame as? ID3FrameWithStringContent { builder.conductor(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.conductor(frame: f) }
         case .contentGrouping:
-            if let f = frame as? ID3FrameWithStringContent { builder.contentGrouping(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.contentGrouping(frame: f) }
         case .copyright:
-            if let f = frame as? ID3FrameWithStringContent { builder.copyright(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.copyright(frame: f) }
         case .encodedBy:
-            if let f = frame as? ID3FrameWithStringContent { builder.encodedBy(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.encodedBy(frame: f) }
         case .encoderSettings:
-            if let f = frame as? ID3FrameWithStringContent { builder.encoderSettings(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.encoderSettings(frame: f) }
         case .fileOwner:
-            if let f = frame as? ID3FrameWithStringContent { builder.fileOwner(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.fileOwner(frame: f) }
         case .lyricist:
-            if let f = frame as? ID3FrameWithStringContent { builder.lyricist(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.lyricist(frame: f) }
         case .mixArtist:
-            if let f = frame as? ID3FrameWithStringContent { builder.mixArtist(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.mixArtist(frame: f) }
         case .publisher:
-            if let f = frame as? ID3FrameWithStringContent { builder.publisher(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.publisher(frame: f) }
         case .subtitle:
-            if let f = frame as? ID3FrameWithStringContent { builder.subtitle(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.subtitle(frame: f) }
         case .beatsPerMinute:
-            if let f = frame as? ID3FrameWithIntegerContent { builder.beatsPerMinute(frame: f) }
+            if let f = frame as? ID3FrameWithIntegerContent { _ = builder.beatsPerMinute(frame: f) }
         case .originalFilename:
-            if let f = frame as? ID3FrameWithStringContent { builder.originalFilename(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.originalFilename(frame: f) }
         case .lengthInMilliseconds:
-            if let f = frame as? ID3FrameWithIntegerContent { builder.lengthInMilliseconds(frame: f) }
+            if let f = frame as? ID3FrameWithIntegerContent { _ = builder.lengthInMilliseconds(frame: f) }
         case .sizeInBytes:
-            if let f = frame as? ID3FrameWithIntegerContent { builder.sizeInBytes(frame: f) }
+            if let f = frame as? ID3FrameWithIntegerContent { _ = builder.sizeInBytes(frame: f) }
         case .genre:
-            if let f = frame as? ID3FrameGenre { builder.genre(frame: f) }
+            if let f = frame as? ID3FrameGenre { _ = builder.genre(frame: f) }
         case .discPosition:
-            if let f = frame as? ID3FramePartOfTotal { builder.discPosition(frame: f) }
+            if let f = frame as? ID3FramePartOfTotal { _ = builder.discPosition(frame: f) }
         case .trackPosition:
-            if let f = frame as? ID3FramePartOfTotal { builder.trackPosition(frame: f) }
+            if let f = frame as? ID3FramePartOfTotal { _ = builder.trackPosition(frame: f) }
         case .initialKey:
-            if let f = frame as? ID3FrameWithStringContent { builder.initialKey(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.initialKey(frame: f) }
         case .recordingDayMonth:
-            if let f = frame as? ID3FrameRecordingDayMonth { builder.recordingDayMonth(frame: f) }
+            if let f = frame as? ID3FrameRecordingDayMonth { _ = builder.recordingDayMonth(frame: f) }
         case .recordingYear:
-            if let f = frame as? ID3FrameWithIntegerContent { builder.recordingYear(frame: f) }
+            if let f = frame as? ID3FrameWithIntegerContent { _ = builder.recordingYear(frame: f) }
         case .recordingHourMinute:
-            if let f = frame as? ID3FrameRecordingHourMinute { builder.recordingHourMinute(frame: f) }
+            if let f = frame as? ID3FrameRecordingHourMinute { _ = builder.recordingHourMinute(frame: f) }
         case .recordingDateTime:
             // v2.4-only frame with no v2.3 equivalent — decompose into the
             // separate day/month, hour/minute, and year frames v2.3 uses.
             if let f = frame as? ID3FrameRecordingDateTime {
                 let dateTime = f.recordingDateTime
                 if dateTime.date?.day != nil || dateTime.date?.month != nil {
-                    builder.recordingDayMonth(
+                    _ = builder.recordingDayMonth(
                         frame: ID3FrameRecordingDayMonth(day: dateTime.date?.day, month: dateTime.date?.month))
                 }
                 if dateTime.time?.hour != nil || dateTime.time?.minute != nil {
-                    builder.recordingHourMinute(
+                    _ = builder.recordingHourMinute(
                         frame: ID3FrameRecordingHourMinute(hour: dateTime.time?.hour, minute: dateTime.time?.minute))
                 }
                 if let year = dateTime.date?.year {
-                    builder.recordingYear(frame: ID3FrameWithIntegerContent(value: year))
+                    _ = builder.recordingYear(frame: ID3FrameWithIntegerContent(value: year))
                 }
             }
         case .attachedPicture(let pictureType):
             if let f = frame as? ID3FrameAttachedPicture {
-                builder.attachedPicture(pictureType: pictureType, frame: f)
+                _ = builder.attachedPicture(pictureType: pictureType, frame: f)
             }
         case .unsynchronizedLyrics(let language):
             if let f = frame as? ID3FrameWithLocalizedContent {
-                builder.unsynchronisedLyrics(language: language, frame: f)
+                _ = builder.unsynchronisedLyrics(language: language, frame: f)
             }
         case .comment(let language):
-            if let f = frame as? ID3FrameWithLocalizedContent { builder.comment(language: language, frame: f) }
+            if let f = frame as? ID3FrameWithLocalizedContent { _ = builder.comment(language: language, frame: f) }
         case .iTunesGrouping:
-            if let f = frame as? ID3FrameWithStringContent { builder.iTunesGrouping(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.iTunesGrouping(frame: f) }
         case .iTunesMovementName:
-            if let f = frame as? ID3FrameWithStringContent { builder.iTunesMovementName(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.iTunesMovementName(frame: f) }
         case .iTunesMovementIndex:
-            if let f = frame as? ID3FrameWithIntegerContent { builder.iTunesMovementIndex(frame: f) }
+            if let f = frame as? ID3FrameWithIntegerContent { _ = builder.iTunesMovementIndex(frame: f) }
         case .iTunesMovementCount:
-            if let f = frame as? ID3FrameWithIntegerContent { builder.iTunesMovementCount(frame: f) }
+            if let f = frame as? ID3FrameWithIntegerContent { _ = builder.iTunesMovementCount(frame: f) }
         case .iTunesPodcastCategory:
-            if let f = frame as? ID3FrameWithStringContent { builder.iTunesPodcastCategory(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.iTunesPodcastCategory(frame: f) }
         case .iTunesPodcastDescription:
-            if let f = frame as? ID3FrameWithStringContent { builder.iTunesPodcastDescription(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.iTunesPodcastDescription(frame: f) }
         case .iTunesPodcastID:
-            if let f = frame as? ID3FrameWithStringContent { builder.iTunesPodcastID(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.iTunesPodcastID(frame: f) }
         case .iTunesPodcastKeywords:
-            if let f = frame as? ID3FrameWithStringContent { builder.iTunesPodcastKeywords(frame: f) }
+            if let f = frame as? ID3FrameWithStringContent { _ = builder.iTunesPodcastKeywords(frame: f) }
         }
     }
 }

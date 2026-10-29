@@ -11,7 +11,7 @@ import Foundation
 /// the folder the user granted access to, no extra sandbox permission is
 /// needed to write it.
 enum BackupManager {
-    static let backupFolderName = "_CleanMyDigital Backups"
+    nonisolated static let backupFolderName = "_CleanMyDigital Backups"
 
     /// Backs up `fileURL` under `root` if it hasn't been backed up already
     /// this session. No-ops if a backup already exists at the mirrored path.

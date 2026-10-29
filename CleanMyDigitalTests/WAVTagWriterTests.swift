@@ -309,3 +309,31 @@ struct TruncatedRIFFTests {
         #expect(reparsed.first?.data.allSatisfy { $0 == 0xAB } == true)
     }
 }
+
+/// The 1.2.2 crash: once truncated WAVs started parsing, a damaged "ID3 "
+/// chunk reached ID3TagEditor, which traps instead of throwing — taking the
+/// whole scan down. The structure is now checked before handing it over.
+struct ID3ChunkValidationTests {
+    @Test func rejectsALocalizedFrameTooShortForItsLanguageCode() {
+        var tag = Array("ID3".utf8) + [0x03, 0x00, 0x00]
+        tag += [0x00, 0x00, 0x00, 0x0C]            // syncsafe size: 12
+        tag += Array("COMM".utf8)
+        tag += [0x00, 0x00, 0x00, 0x02, 0x00, 0x00] // 2-byte body: too short
+        tag += [0x00, 0x00]
+        #expect(!ID3ChunkMetadata.isWellFormed(tag))
+    }
+
+    @Test func rejectsGarbageAndOverlongFrames() {
+        #expect(!ID3ChunkMetadata.isWellFormed([UInt8](repeating: 0xAB, count: 64)))
+        #expect(!ID3ChunkMetadata.isWellFormed(Array("ID3".utf8) + [0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7F]))
+    }
+
+    @Test func acceptsAWellFormedTag() {
+        var tag = Array("ID3".utf8) + [0x03, 0x00, 0x00]
+        tag += [0x00, 0x00, 0x00, 0x10]            // syncsafe size: 16
+        tag += Array("TIT2".utf8)
+        tag += [0x00, 0x00, 0x00, 0x06, 0x00, 0x00]
+        tag += [0x00] + Array("Hello".utf8)        // encoding byte + text
+        #expect(ID3ChunkMetadata.isWellFormed(tag))
+    }
+}
