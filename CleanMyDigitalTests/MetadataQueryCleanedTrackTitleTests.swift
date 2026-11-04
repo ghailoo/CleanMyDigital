@@ -306,3 +306,28 @@ struct FileNameNoiseTests {
         #expect(MetadataQuery.strippingTrackNumberSegment(from: "Doggystyle - Crydamoure 2") == "Doggystyle - Crydamoure 2")
     }
 }
+
+/// "…Chris Lake Remix [www.slider.kz].mp3" — a download site's watermark
+/// stamped into the filename.
+struct DownloadSiteTagTests {
+    @Test func dropsTheSiteTagFromTheRealFile() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "Josh Wink & Lil' Louis - French kiss (How's Your Evening So Far) Chris Lake Remix [www.slider.kz].mp3",
+            artist: "Josh Wink & Lil' Louis", category: .singles)
+            == "French kiss (How's Your Evening So Far) Chris Lake Remix")
+    }
+
+    @Test func dropsOtherShapesOfTheSameThing() {
+        #expect(MetadataQuery.strippingDownloadSiteTag(from: "Track (mp3crazy.com)") == "Track")
+        #expect(MetadataQuery.strippingDownloadSiteTag(from: "Track [Muzlan.ru]") == "Track")
+        #expect(MetadataQuery.strippingDownloadSiteTag(from: "Track - www.site.ru") == "Track")
+        #expect(MetadataQuery.strippingDownloadSiteTag(from: "[www.x.kz] Track") == "Track")
+    }
+
+    @Test func leavesRealTitlesAlone() {
+        #expect(MetadataQuery.strippingDownloadSiteTag(from: "3 A.M. Eternal (Live At The S.S.L.)")
+                == "3 A.M. Eternal (Live At The S.S.L.)")
+        #expect(MetadataQuery.strippingDownloadSiteTag(from: "Finally (DJ Meri Mix)") == "Finally (DJ Meri Mix)")
+        #expect(MetadataQuery.strippingDownloadSiteTag(from: "Mr. Vain (Club Mix)") == "Mr. Vain (Club Mix)")
+    }
+}

@@ -174,6 +174,7 @@ enum MetadataQuery {
         }
 
         name = strippingTrackNumberSegment(from: name)
+        name = strippingDownloadSiteTag(from: name)
         name = strippingDurationMarker(from: name)
         name = name.replacingOccurrences(of: "_", with: " ")
         name = strippingIdentifierNumber(from: name)
@@ -216,6 +217,31 @@ enum MetadataQuery {
             previous = current
         }
         return previous[second.count]
+    }
+
+    /// Drops a download site's watermark — "French kiss … Chris Lake Remix
+    /// [www.slider.kz]" → "French kiss … Chris Lake Remix". Any bracketed or
+    /// parenthesised group holding a "www." or a domain is removed, wherever
+    /// it sits, plus a bare "www…" left hanging at the end.
+    ///
+    /// The domain list is explicit rather than "any dotted word", so a real
+    /// title keeps its abbreviations — "(Live At The S.S.L.)" stays.
+    static func strippingDownloadSiteTag(from title: String) -> String {
+        let domain = #"(?:com|net|org|ru|kz|ua|by|uz|pl|cz|info|biz|me|cc|to|fm|io|tv|xyz|club|site|online|pw|mp3)"#
+        let siteLike = #"(?:www\.\S+|[a-z0-9][a-z0-9-]*\."# + domain + #"\b)"#
+        let bracketed = #"\s*[\(\[][^()\[\]]*"# + siteLike + #"[^()\[\]]*[\)\]]"#
+        let bare = #"\s*[-–—]?\s*www\.\S+\s*$"#
+
+        var result = title
+        for pattern in [bracketed, bare] {
+            while let range = result.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+                result = result.replacingCharacters(in: range, with: " ")
+            }
+        }
+        result = result
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " -_"))
+        return result.isEmpty ? title : result
     }
 
     /// Drops everything up to and including a bare track number sitting
