@@ -235,3 +235,44 @@ struct SceneGroupTagTests {
         #expect(MetadataQuery.strippingSceneGroupTag(from: "Live Fast-Die Young") == "Live Fast-Die Young")
     }
 }
+
+/// The real file: "Archigram - Doggystyle_1318768774 - Crydamoure 2.mp3"
+/// found nothing on Discogs until the download ID came out of the title.
+struct IdentifierNumberTests {
+    @Test func dropsADownloadIDGluedIntoTheFileName() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "Archigram - Doggystyle_1318768774 - Crydamoure 2.mp3",
+            artist: "Archigram", category: .singles) == "Doggystyle - Crydamoure 2")
+    }
+
+    @Test func keepsShortNumbersThatBelongToTheTitle() {
+        #expect(MetadataQuery.strippingIdentifierNumber(from: "1999") == "1999")
+        #expect(MetadataQuery.strippingIdentifierNumber(from: "Blink 182") == "Blink 182")
+        #expect(MetadataQuery.strippingIdentifierNumber(from: "20000 Leagues") == "20000 Leagues")
+        #expect(MetadataQuery.strippingIdentifierNumber(from: "Pacific 0101 (Remix Edit)") == "Pacific 0101 (Remix Edit)")
+    }
+
+    @Test func cleansUpTheSeparatorTheIDLeavesBehind() {
+        #expect(MetadataQuery.strippingIdentifierNumber(from: "Doggystyle - 1318768774 - Crydamoure") == "Doggystyle - Crydamoure")
+        #expect(MetadataQuery.strippingIdentifierNumber(from: "Doggystyle 1318768774") == "Doggystyle")
+    }
+
+    @Test func aTitleThatIsOnlyAnIDIsLeftAlone() {
+        #expect(MetadataQuery.strippingIdentifierNumber(from: "1318768774") == "1318768774")
+    }
+}
+
+struct TrailingDashSegmentTests {
+    @Test func dropsTheLabelThatTrailsTheTitle() {
+        #expect(MetadataQuery.strippingTrailingDashSegment(from: "Doggystyle - Crydamoure 2") == "Doggystyle")
+    }
+
+    @Test func dropsOnlyTheLastSegment() {
+        #expect(MetadataQuery.strippingTrailingDashSegment(from: "A - B - C") == "A - B")
+    }
+
+    @Test func nilWhenThereIsNothingToDrop() {
+        #expect(MetadataQuery.strippingTrailingDashSegment(from: "Doggystyle") == nil)
+        #expect(MetadataQuery.strippingTrailingDashSegment(from: " - Crydamoure") == nil)
+    }
+}

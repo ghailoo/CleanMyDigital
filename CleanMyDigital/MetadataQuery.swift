@@ -174,7 +174,46 @@ enum MetadataQuery {
         }
 
         name = name.replacingOccurrences(of: "_", with: " ")
+        name = strippingIdentifierNumber(from: name)
         return strippingFeaturedArtist(from: strippingSceneGroupTag(from: name))
+    }
+
+    /// Drops a standalone run of six or more digits — the download/store ID
+    /// a shop or ripper glues into a filename ("Archigram - Doggystyle_1318768774
+    /// - Crydamoure 2" → "Archigram - Doggystyle - Crydamoure 2"). No provider
+    /// indexes it, so leaving it in turns a findable title into zero results.
+    ///
+    /// Six is the threshold so real numbers in titles survive: years ("1999"),
+    /// track numbers, "20000 Leagues", "Blink 182". A separator left dangling
+    /// by the removal is cleaned up with it, and a title that is *nothing but*
+    /// an ID is kept as-is rather than emptied.
+    /// ponytail: length heuristic; a genuine six-digit title would lose it.
+    static func strippingIdentifierNumber(from title: String) -> String {
+        guard title.range(of: #"\d{6,}"#, options: .regularExpression) != nil else { return title }
+        let stripped = title
+            .replacingOccurrences(of: #"\d{6,}"#, with: "", options: .regularExpression)
+            // "Title -  - Mix" (both sides of a removed ID) collapses to one dash.
+            .replacingOccurrences(of: #"-[\s_]*-"#, with: "-", options: .regularExpression)
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " -_"))
+        return stripped.isEmpty ? title : stripped
+    }
+
+    /// Drops the last " - " segment of a track title — "Doggystyle -
+    /// Crydamoure 2" → "Doggystyle" — for a fallback search once the full
+    /// title has found nothing. Filenames routinely carry a label, catalogue
+    /// number or compilation name after the title, and no provider indexes
+    /// those as part of the track. Returns nil when there's nothing to drop,
+    /// so callers know not to repeat the same request.
+    ///
+    /// Only ever a fallback: a title that genuinely contains " - "
+    /// ("Track - Reprise") is searched in full first, and this tier runs
+    /// only when that found nothing at all.
+    static func strippingTrailingDashSegment(from trackTitle: String) -> String? {
+        guard let range = trackTitle.range(of: " - ", options: .backwards) else { return nil }
+        let stripped = String(trackTitle[..<range.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? nil : stripped
     }
 
     /// Drops a trailing scene release-group tag — "live fast-die young-gem"

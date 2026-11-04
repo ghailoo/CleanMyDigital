@@ -286,7 +286,9 @@ enum DiscogsClient {
     /// Searches with the given track title; if that comes back with zero
     /// results, retries once with a trailing "(Mix)"-style parenthetical
     /// stripped, since a mix/edit name Discogs doesn't recognize can shadow
-    /// an otherwise-findable release. If that's still empty and
+    /// an otherwise-findable release, then once more with whatever trails
+    /// the last " - " dropped (a label or compilation name the filename
+    /// carried along). If that's still empty and
     /// `allowArtistOnlyFallback` is true, retries once more with just the
     /// artist (empty track) — Discogs' track-level search is much narrower
     /// than its artist-only search and can fail on small differences
@@ -325,13 +327,21 @@ enum DiscogsClient {
             if !fallbackResults.isEmpty { return fallbackResults }
         }
 
+        // Then without whatever trails the last " - " — filenames carry a
+        // label or compilation name there ("Doggystyle - Crydamoure 2")
+        // that Discogs never indexes as part of the track.
+        if let fallbackTrack = MetadataQuery.strippingTrailingDashSegment(from: track) {
+            let fallbackResults = try await performSearch(artist: artist, track: fallbackTrack, album: album, token: token)
+            if !fallbackResults.isEmpty { return fallbackResults }
+        }
+
         guard shouldAttemptArtistOnlyFallback(
             artist: artist, track: track, allowArtistOnlyFallback: allowArtistOnlyFallback)
         else { return [] }
         return try await performSearch(artist: artist, track: "", album: album, token: token)
     }
 
-    /// The gating decision behind `search`'s third retry tier — factored
+    /// The gating decision behind `search`'s last retry tier — factored
     /// out, like `searchURL`, so it can be verified without hitting the
     /// network. See `search`'s doc comment for what each condition guards
     /// against.
