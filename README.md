@@ -5,6 +5,29 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.4
+
+- **Drag and drop.** Drop a folder anywhere on the window to scan it — or drop a few
+  tracks and it scans the folder they sit in. Dropping another folder over the
+  results rescans. Albums and Compilations still take one folder at a time: drop
+  several and it scans the first and tells you which. Anything that isn't a folder
+  or an audio file is ignored.
+- **A real search syntax.** Every word has to match now, so `daft discovery` narrows
+  instead of widening:
+  - `artist:daft` — search one field. Fields: `artist`, `title`, `album`, `genre`,
+    `year`, `track`, `format`, `folder`.
+  - `-flac` — exclude anything matching.
+  - `"hotel costes"` — keep a phrase together, and combine it with the rest
+    (`album:"hotel costes"`).
+  - A plain word now also searches genre, year, track number, format and the
+    containing folder — none of which were searchable before.
+- **Better matching for messy filenames.** A download ID glued into a filename
+  (`Doggystyle_1318768774`) is dropped before searching, and a title that still
+  finds nothing is retried without whatever trails the last " - " — usually a label
+  or compilation name the filename carried along.
+
+---
+
 ## What's new in 1.3
 
 - **Is it really lossless?** *Check ▸ Check Quality of All Files* (or right-click
@@ -214,7 +237,9 @@ occasional tools.
 ### The workflow
 
 **Choose Folder…** — pick a folder and scan it. For Singles you can select several
-folders at once (see Folder structure above).
+folders at once (see Folder structure above). You can also **drop folders straight
+onto the window**, in any state — and dropping a few tracks scans the folder they
+sit in.
 
 **Rescan** — re-read the scanned folders from disk. Use this after changing files
 outside the app. In Albums, the arrow beside it also offers **Rescan Treating This
@@ -273,6 +298,28 @@ MusicBrainz contact email in Settings.
 **Title and Track Number** from Discogs, because it loads the release's full
 tracklist and lets you pick which track the file is. It also lets you correct the
 search terms by hand when the automatic ones guess wrong.
+
+---
+
+## Finding a file in the results
+
+The search field (⌘F) filters the table as you type. Every term has to match, so
+adding words narrows the list:
+
+| You type | You get |
+| --- | --- |
+| `daft discovery` | rows matching **both** words, each in any field |
+| `artist:daft` | only the Artist field |
+| `-flac` | everything **except** FLAC |
+| `"hotel costes"` | the phrase, kept together |
+| `album:"hotel costes" -live` | combine them |
+
+Fields you can name: `artist`, `title`, `album`, `genre`, `year`, `track`,
+`format`, `folder`. A term with no field searches the filename, every tag, the
+format and the containing folder.
+
+The buttons above the table (Total, With issues, No metadata, Complete, Found,
+Fake) filter separately, and stack with whatever you've typed.
 
 ---
 
