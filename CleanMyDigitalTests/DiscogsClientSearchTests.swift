@@ -54,6 +54,21 @@ struct DiscogsClientSearchTests {
         #expect(DiscogsClient.releaseArtist(of: Self.release("Crisis (2) - Kollectiv"), matches: "Crisis"))
     }
 
+    /// The real file: "01 Kings Of Tommorow feat. Julie McKnight - Finally
+    /// (DJ Meri Mix).flac" — the tag misspells the artist, so the right
+    /// release was being shown as a title-only match.
+    @Test func releaseArtistToleratesATypoInTheFilesOwnTag() {
+        #expect(DiscogsClient.releaseArtist(
+            of: Self.release("Kings Of Tomorrow Feat. Julie McKnight - Finally"),
+            matches: "Kings Of Tommorow"))
+    }
+
+    @Test func releaseArtistStillRejectsShortLookalikes() {
+        // Seven characters, one edit apart, and two different artists.
+        #expect(!DiscogsClient.releaseArtist(of: Self.release("Shooter - Song"), matches: "Scooter"))
+        #expect(!DiscogsClient.releaseArtist(of: Self.release("Kings Of Leon - Song"), matches: "Kings Of Tommorow"))
+    }
+
     @Test func releaseArtistRejectsSomeoneElse() {
         #expect(!DiscogsClient.releaseArtist(of: Self.release("Taborah Adams - A Better Day"), matches: "Wareband"))
         #expect(!DiscogsClient.releaseArtist(of: Self.release("Xavier - Song"), matches: "X"))

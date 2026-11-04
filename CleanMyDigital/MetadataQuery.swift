@@ -178,6 +178,44 @@ enum MetadataQuery {
         return strippingFeaturedArtist(from: strippingSceneGroupTag(from: name))
     }
 
+    /// Whether two normalized names differ by no more than a typo —
+    /// "kingsoftommorow" vs "kingsoftomorrow", a real file whose own tag
+    /// misspells the artist. Only ever a fallback, once an exact or
+    /// containment check has already failed.
+    ///
+    /// Deliberately conservative, because a false positive here means
+    /// trusting the wrong release: nothing under ten characters is fuzzy
+    /// matched at all (so "Scooter" never matches "Shooter"), ten to
+    /// thirteen allow one edit, and only fourteen or more allow two.
+    /// ponytail: length-scaled threshold, not a similarity score.
+    static func isNearMatch(_ first: String, _ second: String) -> Bool {
+        let longest = max(first.count, second.count)
+        let allowed = longest >= 14 ? 2 : (longest >= 10 ? 1 : 0)
+        guard allowed > 0, abs(first.count - second.count) <= allowed else { return false }
+        return editDistance(first, second, stoppingAbove: allowed) <= allowed
+    }
+
+    /// Levenshtein distance, abandoned early once every path already costs
+    /// more than `stoppingAbove` — the answer is only ever compared against
+    /// that limit, so an exact distance beyond it is wasted work.
+    private static func editDistance(_ first: String, _ second: String, stoppingAbove limit: Int) -> Int {
+        let first = Array(first), second = Array(second)
+        guard !first.isEmpty, !second.isEmpty else { return max(first.count, second.count) }
+
+        var previous = Array(0...second.count)
+        for row in 1...first.count {
+            var current = [row] + Array(repeating: 0, count: second.count)
+            for column in 1...second.count {
+                current[column] = first[row - 1] == second[column - 1]
+                    ? previous[column - 1]
+                    : min(previous[column - 1], previous[column], current[column - 1]) + 1
+            }
+            if current.min()! > limit { return limit + 1 }
+            previous = current
+        }
+        return previous[second.count]
+    }
+
     /// Drops a standalone run of six or more digits — the download/store ID
     /// a shop or ripper glues into a filename ("Archigram - Doggystyle_1318768774
     /// - Crydamoure 2" → "Archigram - Doggystyle - Crydamoure 2"). No provider

@@ -473,6 +473,8 @@ enum DiscogsClient {
     /// ignoring case, accents, punctuation, "feat." credits and Discogs' "*" /
     /// " (2)" name suffixes. Either may contain the other, so "Wareband"
     /// matches "Wareband Featuring Tad Robinson" and "808 State & UB40".
+    /// A long name misspelled in the file's own tag still matches, within a
+    /// typo or two — see `MetadataQuery.isNearMatch`.
     static func releaseArtist(of release: DiscogsRelease, matches artist: String) -> Bool {
         guard let releaseArtist = release.parsedArtist else { return false }
         func key(_ name: String) -> String {
@@ -485,7 +487,10 @@ enum DiscogsClient {
         let found = key(releaseArtist), wanted = key(artist)
         // Very short names ("X") would be contained in almost anything.
         guard found.count >= 3, wanted.count >= 3 else { return !found.isEmpty && found == wanted }
-        return found.contains(wanted) || wanted.contains(found)
+        if found.contains(wanted) || wanted.contains(found) { return true }
+        // A typo in the file's own tag ("Kings Of Tommorow") shouldn't demote
+        // the right release to a title-only match.
+        return MetadataQuery.isNearMatch(found, wanted)
     }
 
     /// Combines an artist and a track title into one free-text search term
