@@ -21,3 +21,4 @@ mistral-src/
 .claude/settings.local.json
 skills-lock.json
 graphify-out/
+.claude/scheduled_tasks.lock
