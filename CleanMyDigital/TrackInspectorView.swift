@@ -270,6 +270,10 @@ struct TrackInspectorView: View {
 
     private func lookupText(for file: AudioFile) -> String {
         guard let outcome = scanner.lookupResults[file.url] else { return "Not searched" }
-        return outcome.isFound ? "Match found" : "No match"
+        switch outcome.confidence {
+        case .confident: return "Match found"
+        case .review: return "Match found — needs review"
+        case .none: return "No match"
+        }
     }
 }

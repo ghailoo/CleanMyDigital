@@ -201,7 +201,7 @@ enum MetadataQuery {
     /// Levenshtein distance, abandoned early once every path already costs
     /// more than `stoppingAbove` — the answer is only ever compared against
     /// that limit, so an exact distance beyond it is wasted work.
-    private static func editDistance(_ first: String, _ second: String, stoppingAbove limit: Int) -> Int {
+    static func editDistance(_ first: String, _ second: String, stoppingAbove limit: Int) -> Int {
         let first = Array(first), second = Array(second)
         guard !first.isEmpty, !second.isEmpty else { return max(first.count, second.count) }
 

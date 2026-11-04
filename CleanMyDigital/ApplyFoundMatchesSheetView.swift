@@ -369,7 +369,7 @@ struct ApplyFoundMatchesSheetView: View {
 
     /// This file's `.found` outcome, split into its three associated values.
     private func found(for file: AudioFile) -> (provider: MetadataProvider, candidate: LookupCandidate, fillable: Set<MetadataField>)? {
-        guard case .found(let provider, let candidate, let fillable) = scanner.lookupResults[file.url] else { return nil }
+        guard case .found(let provider, let candidate, let fillable, _) = scanner.lookupResults[file.url] else { return nil }
         return (provider, candidate, fillable)
     }
 
@@ -771,9 +771,12 @@ struct ApplyFoundMatchesSheetView: View {
     /// sync starts selected; a file the user already explicitly
     /// deselected stays that way; a file that's gone (applied, or
     /// resolved by a correction) is simply dropped.
+    /// A match whose names only partly agree starts unticked: it's shown
+    /// and applicable, but nothing writes it until the user says so.
     private func syncSelection() {
         let currentURLs = Set(writableTargets.map(\.url))
         let newURLs = currentURLs.subtracting(knownTargetURLs)
+            .filter { scanner.lookupResults[$0]?.isConfident == true }
         selection.formIntersection(currentURLs)
         selection.formUnion(newURLs)
         knownTargetURLs = currentURLs
@@ -794,7 +797,7 @@ struct ApplyFoundMatchesSheetView: View {
 
         for file in files {
             defer { applyCompletedCount += 1 }
-            guard case .found(_, let candidate, let fillable) = scanner.lookupResults[file.url] else { continue }
+            guard case .found(_, let candidate, let fillable, _) = scanner.lookupResults[file.url] else { continue }
 
             do {
                 var changes = try await candidate.buildChanges(fillable: fillable, discogsToken: discogsToken)

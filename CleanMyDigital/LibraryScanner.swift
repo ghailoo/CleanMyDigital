@@ -1153,8 +1153,11 @@ final class LibraryScanner {
             }
             if let releases, let top = releases.first {
                 let fillable = top.fillableFields(missing: missing)
-                if !fillable.isEmpty {
-                    return .found(provider: .discogs, candidate: .discogs(top), fillableFields: fillable)
+                let confidence = MatchScore.confidence(
+                    fileName: "\(query.artist) \(query.track)", resultName: top.title)
+                if !fillable.isEmpty, confidence != .none {
+                    return .found(provider: .discogs, candidate: .discogs(top),
+                                  fillableFields: fillable, confidence: confidence)
                 }
             }
         }
@@ -1165,8 +1168,12 @@ final class LibraryScanner {
                 artist: query.artist, recording: query.recording, contactEmail: musicBrainzContact),
                let top = recordings.first {
                 let fillable = top.fillableFields(missing: missing)
-                if !fillable.isEmpty {
-                    return .found(provider: .musicBrainz, candidate: .musicBrainz(top), fillableFields: fillable)
+                let confidence = MatchScore.confidence(
+                    fileName: "\(query.artist) \(query.recording)",
+                    resultName: "\(top.artistNames) \(top.title)")
+                if !fillable.isEmpty, confidence != .none {
+                    return .found(provider: .musicBrainz, candidate: .musicBrainz(top),
+                                  fillableFields: fillable, confidence: confidence)
                 }
             }
         }

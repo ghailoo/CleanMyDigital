@@ -34,6 +34,7 @@ struct ContentView: View {
         case noMetadata = "No Metadata at All"
         case complete = "Complete"
         case found = "Found"
+        case review = "To Review"
         case fake = "Fake"
 
         var id: String { rawValue }
@@ -68,7 +69,9 @@ struct ContentView: View {
             FilterStat(filter: .complete, label: "Complete", color: .green,
                        count: files.count { !$0.hasIssues }),
             FilterStat(filter: .found, label: "Found", color: .blue,
-                       count: files.count { lookupResults[$0.url]?.isFound == true }),
+                       count: files.count { lookupResults[$0.url]?.isConfident == true }),
+            FilterStat(filter: .review, label: "To review", color: .orange,
+                       count: files.count { lookupResults[$0.url]?.confidence == .review }),
             FilterStat(filter: .fake, label: "Fake", color: .red,
                        count: files.count { isFake($0, spectralResults: spectralResults) }),
         ]
@@ -86,7 +89,8 @@ struct ContentView: View {
         case .issues: return file.hasIssues
         case .noMetadata: return file.hasNoMetadata
         case .complete: return !file.hasIssues
-        case .found: return lookupResults[file.url]?.isFound == true
+        case .found: return lookupResults[file.url]?.isConfident == true
+        case .review: return lookupResults[file.url]?.confidence == .review
         case .fake: return isFake(file, spectralResults: spectralResults)
         }
     }
@@ -548,17 +552,22 @@ struct ContentView: View {
     @ViewBuilder
     private func lookupBadge(for file: AudioFile) -> some View {
         switch scanner.lookupResults[file.url] {
-        case .found(let provider, _, _):
-            Text("Found")
+        case .found(let provider, _, _, let confidence):
+            let isConfident = confidence == .confident
+            Text(isConfident ? "Found" : "To review")
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(.green)
+                .foregroundStyle(isConfident ? .green : .orange)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Color.green.opacity(0.15), in: Capsule())
-                .help("Found via \(provider.rawValue)")
+                .background((isConfident ? Color.green : Color.orange).opacity(0.15), in: Capsule())
+                .help(isConfident
+                      ? "Found via \(provider.rawValue)"
+                      : "Found via \(provider.rawValue), but the names only partly agree — check it before applying")
                 // Which provider matched is only in the tooltip, so it's
                 // folded into the spoken label rather than lost.
-                .accessibilityLabel("Match found via \(provider.rawValue)")
+                .accessibilityLabel(isConfident
+                                    ? "Match found via \(provider.rawValue)"
+                                    : "Uncertain match via \(provider.rawValue), needs review")
                 .transition(.opacity)
         case .noMatch:
             Text("No match")

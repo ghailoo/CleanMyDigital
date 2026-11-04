@@ -156,9 +156,33 @@ struct ContentViewFilterTests {
     /// `id`/`title` are non-optional) — same technique
     /// `DiscogsReleaseFormatTests` uses, since `DiscogsRelease` has no
     /// direct memberwise initializer available outside its own file.
-    private static func makeFoundOutcome() throws -> LookupOutcome {
+    private static func makeFoundOutcome(
+        confidence: MatchConfidence = .confident
+    ) throws -> LookupOutcome {
         let json = Data(#"{"id": 1, "title": "Artist - Track"}"#.utf8)
         let release = try JSONDecoder().decode(DiscogsRelease.self, from: json)
-        return .found(provider: .discogs, candidate: .discogs(release), fillableFields: [])
+        return .found(provider: .discogs, candidate: .discogs(release),
+                      fillableFields: [], confidence: confidence)
+    }
+
+    /// A match whose names only partly agree counts under "To review", never
+    /// under "Found" — the two filters must not both claim it.
+    @Test func reviewMatchesAreCountedSeparatelyFromFoundOnes() throws {
+        let confident = Self.makeFile(name: "sure.mp3")
+        let uncertain = Self.makeFile(name: "unsure.mp3")
+        let results: [URL: LookupOutcome] = [
+            confident.url: try Self.makeFoundOutcome(),
+            uncertain.url: try Self.makeFoundOutcome(confidence: .review),
+        ]
+        let files = [confident, uncertain]
+
+        let stats = ContentView.filterStats(files: files, lookupResults: results)
+        #expect(stats.first { $0.filter == .found }?.count == 1)
+        #expect(stats.first { $0.filter == .review }?.count == 1)
+
+        #expect(ContentView.fileMatches(confident, filter: .found, lookupResults: results))
+        #expect(!ContentView.fileMatches(confident, filter: .review, lookupResults: results))
+        #expect(ContentView.fileMatches(uncertain, filter: .review, lookupResults: results))
+        #expect(!ContentView.fileMatches(uncertain, filter: .found, lookupResults: results))
     }
 }

@@ -20,6 +20,16 @@ enum LookupCandidate: Sendable {
     case discogs(DiscogsRelease)
     case musicBrainz(MusicBrainzRecording)
 
+    /// The candidate's own name, for scoring it against the file's —
+    /// Discogs titles a search result "Artist - Release", MusicBrainz keeps
+    /// the two apart.
+    var matchName: String {
+        switch self {
+        case .discogs(let release): release.title
+        case .musicBrainz(let recording): "\(recording.artistNames) \(recording.title)"
+        }
+    }
+
     /// Builds tag changes for exactly the fields in `fillable`, using each
     /// provider's release-level fields the same way the per-file comparison
     /// views (`MetadataLookupView.swift`'s `ComparisonView`/
@@ -69,7 +79,8 @@ enum LookupCandidate: Sendable {
 /// `LibraryScanner` (keyed by file URL) rather than on `AudioFile` itself —
 /// it's a scan-session artifact, not part of the file's own metadata.
 enum LookupOutcome: Sendable {
-    case found(provider: MetadataProvider, candidate: LookupCandidate, fillableFields: Set<MetadataField>)
+    case found(provider: MetadataProvider, candidate: LookupCandidate,
+               fillableFields: Set<MetadataField>, confidence: MatchConfidence)
     case noMatch
 
     var isFound: Bool {
@@ -77,8 +88,17 @@ enum LookupOutcome: Sendable {
         return false
     }
 
+    /// A match the app is sure enough of to tick by default. A `.review`
+    /// match is still shown and still applicable — the user ticks it.
+    var isConfident: Bool { confidence == .confident }
+
+    var confidence: MatchConfidence {
+        if case .found(_, _, _, let confidence) = self { return confidence }
+        return .none
+    }
+
     var provider: MetadataProvider? {
-        if case .found(let provider, _, _) = self { return provider }
+        if case .found(let provider, _, _, _) = self { return provider }
         return nil
     }
 }
