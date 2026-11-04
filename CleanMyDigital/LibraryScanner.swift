@@ -207,7 +207,8 @@ final class LibraryScanner {
     /// scopes each selected folder separately, so a multi-folder scan
     /// holds one grant per folder and a write has to re-acquire all of
     /// them — taking only the first would let files in that folder write
-    /// while every other folder failed.
+    /// while every other folder failed. Dropped folders are the exception:
+    /// they have no scope of their own (see below).
     ///
     /// Returns nil if any root is unavailable, after releasing whatever
     /// it already took: a partial grant is worse than none, since it
@@ -216,11 +217,19 @@ final class LibraryScanner {
         guard !scannedFolders.isEmpty else { return nil }
         var accessed: [URL] = []
         for root in scannedFolders {
-            guard root.startAccessingSecurityScopedResource() else {
+            if root.startAccessingSecurityScopedResource() {
+                accessed.append(root)
+                continue
+            }
+            // A folder that arrived by drag is covered by the sandbox grant
+            // the drop itself carried rather than by a scope of its own, so
+            // `startAccessingSecurityScopedResource` reports false while the
+            // folder is perfectly reachable. Only a folder we genuinely
+            // can't read is a failure — and it needs no release either.
+            guard FileManager.default.isReadableFile(atPath: root.path) else {
                 for url in accessed { url.stopAccessingSecurityScopedResource() }
                 return nil
             }
-            accessed.append(root)
         }
         return accessed
     }

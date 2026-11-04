@@ -128,6 +128,8 @@ struct ContentView: View {
     @State private var showInspector = false
     @State private var metadataLookupFile: AudioFile?
     @State private var metadataLookupInitialProvider: MetadataProvider = .discogs
+    @State private var isDropTargeted = false
+    @State private var dropMessage: String?
     @State private var showQuarantineConfirm = false
     @State private var quarantineSummary: String?
     @State private var quarantineMovedCount = 0
@@ -138,15 +140,31 @@ struct ContentView: View {
         var result = scanner.files
         result = result.filter { Self.fileMatches(
             $0, filter: filter, lookupResults: scanner.lookupResults, spectralResults: scanner.spectralResults) }
-        if !searchText.isEmpty {
-            result = result.filter {
-                $0.fileName.localizedCaseInsensitiveContains(searchText)
-                    || ($0.title?.localizedCaseInsensitiveContains(searchText) ?? false)
-                    || ($0.artist?.localizedCaseInsensitiveContains(searchText) ?? false)
-                    || ($0.album?.localizedCaseInsensitiveContains(searchText) ?? false)
-            }
+        let terms = FileSearch.terms(in: searchText)
+        if !terms.isEmpty {
+            result = result.filter { FileSearch.matches($0, terms: terms) }
         }
         return result.sorted(using: sortOrder)
+    }
+
+    private var emptyResultsTitle: String {
+        if scanner.files.isEmpty { return "No audio files found" }
+        return searchText.isEmpty ? "Nothing matches this filter" : "Nothing matches this search"
+    }
+
+    /// Scans whatever was dropped on the window. Returns false — bouncing
+    /// the drag back — when the drop holds nothing scannable, or when a scan
+    /// is already running and would be interrupted half-done.
+    private func beginScan(ofDropped urls: [URL]) -> Bool {
+        guard !showCategoryPrompt, scanner.state != .enumerating, scanner.state != .scanning else {
+            return false
+        }
+        let resolution = DroppedFolders.resolve(urls, category: selectedCategory)
+        guard !resolution.isEmpty else { return false }
+        dropMessage = resolution.summary(category: selectedCategory)
+        let roots = resolution.roots
+        Task { await scanner.scan(folders: roots, category: selectedCategory) }
+        return true
     }
 
     var body: some View {
@@ -164,6 +182,27 @@ struct ContentView: View {
         // without animating the table's own rows once we're in it.
         .consistentAnimation(scanner.state)
         .frame(minWidth: 800, minHeight: 500)
+        // Drop folders (or a few tracks, which scans the folder they're in)
+        // anywhere on the window. A drop is a user selection as far as the
+        // sandbox is concerned, so it carries its own read-write grant — no
+        // bookmark and no entitlement beyond the one the picker already uses.
+        .dropDestination(for: URL.self) { urls, _ in beginScan(ofDropped: urls) }
+            isTargeted: { isDropTargeted = $0 }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 3)
+                    .padding(3)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .consistentAnimation(isDropTargeted)
+        .alert(dropMessage ?? "", isPresented: Binding(
+            get: { dropMessage != nil }, set: { if !$0 { dropMessage = nil } }
+        )) {
+            Button("OK") {}
+        }
         .toolbar { toolbarContent }
         // Feeds the File/View menu commands in `CleanMyDigitalApp`. Nil
         // disables the menu item: no folder picking until the launch
@@ -182,7 +221,7 @@ struct ContentView: View {
             .inspectorColumnWidth(min: 260, ideal: 300, max: 440)
         }
         .labelStyle(.titleAndIcon)
-        .searchable(text: $searchText, prompt: "Search file, title, artist, album")
+        .searchable(text: $searchText, prompt: "Search — try artist:daft, -flac, \"hotel costes\"")
         // Singles are commonly filed one folder per artist, so several can
         // be scanned as one library rather than scanning their shared
         // parent and walking everything else under it. Albums and
@@ -191,7 +230,7 @@ struct ContentView: View {
         // release), which several unrelated roots would muddle.
         .fileImporter(isPresented: $showFolderPicker,
                       allowedContentTypes: [.folder],
-                      allowsMultipleSelection: selectedCategory == .singles) { result in
+                      allowsMultipleSelection: selectedCategory.allowsMultipleFolders) { result in
             if case .success(let urls) = result, !urls.isEmpty {
                 Task { await scanner.scan(folders: urls, category: selectedCategory) }
             }
@@ -319,7 +358,7 @@ struct ContentView: View {
         ContentUnavailableView {
             Label("Scan Your Audio Library", systemImage: "waveform.badge.magnifyingglass")
         } description: {
-            Text("Choose a folder and CleanMyDigital will read every audio file's tags and flag the ones missing title, artist, album, or artwork.")
+            Text("Choose a folder — or drop one onto this window — and CleanMyDigital will read every audio file's tags and flag the ones missing title, artist, album, or artwork.")
         } actions: {
             Button("Choose Folder…") { showFolderPicker = true }
                 .buttonStyle(.borderedProminent)
@@ -361,8 +400,8 @@ struct ContentView: View {
             Divider()
             if filteredFiles.isEmpty {
                 ContentUnavailableView(
-                    scanner.files.isEmpty ? "No audio files found" : "Nothing matches this filter",
-                    systemImage: "music.note.list"
+                    emptyResultsTitle,
+                    systemImage: searchText.isEmpty ? "music.note.list" : "magnifyingglass"
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

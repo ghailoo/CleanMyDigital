@@ -30,6 +30,12 @@ enum LibraryCategory: String, CaseIterable, Identifiable {
     /// Only Albums are checked against their containing ArtistName/ folder —
     /// Singles don't require it, and Compilations aren't organized by artist.
     var checksArtistFolder: Bool { self == .albums }
+
+    /// Singles are commonly filed one folder per artist, so several folders
+    /// can be scanned as one library. Albums and Compilations read meaning
+    /// from the scanned folder's own structure (artist folders, one folder
+    /// per release), which several unrelated roots would muddle.
+    var allowsMultipleFolders: Bool { self == .singles }
 }
 
 /// A single flagged problem on a scanned file: either a missing tag or an

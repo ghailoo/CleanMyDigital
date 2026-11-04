@@ -127,10 +127,11 @@ struct LibraryScannerResetTests {
         await scanner.scan(folder: folder, category: .albums)
         let file = try #require(scanner.files.first)
 
-        // A plain, non-security-scoped temp folder makes the analysis fail
+        // Taking the folder away after the scan makes the analysis fail
         // immediately with `.folderAccessUnavailable` — same technique as
         // `LibraryScannerFolderAccessTests.analyzeSpectrumSetsFailedOutcomeForEveryTarget`
         // — so this populates `spectralResults` without a slow real FFT.
+        try FileManager.default.removeItem(at: folder)
         scanner.analyzeSpectrum()
         var attempts = 0
         while scanner.isAnalyzingSpectrum, attempts < 100 {

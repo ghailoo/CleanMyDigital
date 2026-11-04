@@ -14,16 +14,13 @@ import AVFoundation
 /// `startAccessingSecurityScopedResource()` on the scanned folder returns
 /// false.
 ///
-/// A plain, non-bookmarked temp-directory URL reliably reproduces exactly
-/// that condition in this sandboxed test host: it isn't a security-scoped
-/// resource at all, so the call returns false — the same false this app
-/// would see for a genuinely stale bookmark to a real user-chosen folder in
-/// production, even though the *specific* reason differs (never-scoped vs.
-/// gone-stale). `scan(folder:)` itself still succeeds against such a URL —
-/// real file I/O on a path inside the app's own sandbox container doesn't
-/// actually need security scoping — which is exactly what makes this
-/// reproducible without a real external volume or a live stale bookmark:
-/// only the methods this change touches gate on the scope check.
+/// Each test scans a plain temp folder and then deletes it, so the root is
+/// both unscoped *and* unreachable by the time the operation runs — what a
+/// stale grant actually looks like in production, where losing the grant
+/// makes the path unreadable. A folder that is unscoped but still readable
+/// is deliberately allowed through (see `beginAccessToAllRoots`): that is
+/// precisely a folder dropped onto the window, which carries the sandbox
+/// grant of the drop itself rather than a scope of its own.
 ///
 /// `undoLastFileOperation`'s new branch isn't covered here: reaching it
 /// requires `lastRenameBatch` already populated by a prior successful
@@ -41,6 +38,12 @@ struct LibraryScannerFolderAccessTests {
         let scanner = LibraryScanner()
         await scanner.scan(folder: folder, category: .albums)
         let file = try #require(scanner.files.first)
+
+        // Taking the folder away after the scan is what a lost grant looks
+        // like from here: unreachable. A folder that is merely unscoped but
+        // still readable is now allowed through, since that is exactly what
+        // a folder dropped on the window is.
+        try FileManager.default.removeItem(at: folder)
 
         var changes = TagChanges()
         changes.artist = "2Pac"
@@ -65,6 +68,12 @@ struct LibraryScannerFolderAccessTests {
         await scanner.scan(folder: folder, category: .albums)
         let file = try #require(scanner.files.first)
 
+        // Taking the folder away after the scan is what a lost grant looks
+        // like from here: unreachable. A folder that is merely unscoped but
+        // still readable is now allowed through, since that is exactly what
+        // a folder dropped on the window is.
+        try FileManager.default.removeItem(at: folder)
+
         let proposal = RenameProposal(
             file: file, currentName: "track.mp3", proposedName: "renamed.mp3", isCaseOnlyChange: false)
         let results = await scanner.renameFiles([proposal])
@@ -82,6 +91,12 @@ struct LibraryScannerFolderAccessTests {
         let scanner = LibraryScanner()
         await scanner.scan(folder: folder, category: .singles)
         let file = try #require(scanner.files.first)
+
+        // Taking the folder away after the scan is what a lost grant looks
+        // like from here: unreachable. A folder that is merely unscoped but
+        // still readable is now allowed through, since that is exactly what
+        // a folder dropped on the window is.
+        try FileManager.default.removeItem(at: folder)
 
         let proposal = CollectionProposal(
             file: file, songTitle: "Some Release", pressingName: nil,
@@ -106,6 +121,12 @@ struct LibraryScannerFolderAccessTests {
         await scanner.scan(folder: folder, category: .albums)
         let file = try #require(scanner.files.first)
 
+        // Taking the folder away after the scan is what a lost grant looks
+        // like from here: unreachable. A folder that is merely unscoped but
+        // still readable is now allowed through, since that is exactly what
+        // a folder dropped on the window is.
+        try FileManager.default.removeItem(at: folder)
+
         let proposal = DuplicateMoveProposal(file: file, proposedRelativePath: "_CleanMyDigital Duplicates/track.mp3")
         let results = await scanner.moveDuplicates([proposal])
 
@@ -125,6 +146,12 @@ struct LibraryScannerFolderAccessTests {
         await scanner.scan(folder: folder, category: .albums)
         let groups = AlbumCompletenessChecker.groups(for: scanner.files)
         let group = try #require(groups.first)
+
+        // Taking the folder away after the scan is what a lost grant looks
+        // like from here: unreachable. A folder that is merely unscoped but
+        // still readable is now allowed through, since that is exactly what
+        // a folder dropped on the window is.
+        try FileManager.default.removeItem(at: folder)
 
         let proposal = AlbumFolderRenameProposal(
             group: group, currentFolderName: "Original Folder", proposedFolderName: "Album (1995)")
@@ -147,6 +174,12 @@ struct LibraryScannerFolderAccessTests {
         await scanner.scan(folder: folder, category: .albums)
         let file = try #require(scanner.files.first)
 
+        // Taking the folder away after the scan is what a lost grant looks
+        // like from here: unreachable. A folder that is merely unscoped but
+        // still readable is now allowed through, since that is exactly what
+        // a folder dropped on the window is.
+        try FileManager.default.removeItem(at: folder)
+
         scanner.analyzeSpectrum()
 
         var attempts = 0
@@ -165,8 +198,8 @@ struct LibraryScannerFolderAccessTests {
     // MARK: - Fixture
 
     /// A plain temp folder — deliberately *not* routed through a
-    /// security-scoped bookmark, so `startAccessingSecurityScopedResource()`
-    /// on it returns false, reproducing the condition under test.
+    /// security-scoped bookmark. Each test deletes it after scanning to
+    /// reproduce the condition under test.
     private static func makePlainTempFolder() throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
