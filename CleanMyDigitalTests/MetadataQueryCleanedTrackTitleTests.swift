@@ -276,3 +276,33 @@ struct TrailingDashSegmentTests {
         #expect(MetadataQuery.strippingTrailingDashSegment(from: " - Crydamoure") == nil)
     }
 }
+
+/// Two more real files that found nothing: a rip named
+/// "Artist - Album - NN - Title", and a duration typed into the filename.
+struct FileNameNoiseTests {
+    @Test func dropsTheAlbumAndTrackNumberAheadOfTheTitle() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "Klangkarussell - Sonnentanz - 04 - Sonnentanz (Kellerkind Remix).flac",
+            artist: "Klangkarussell", category: .singles) == "Sonnentanz (Kellerkind Remix)")
+    }
+
+    @Test func dropsATrailingDuration() {
+        #expect(MetadataQuery.cleanedTrackTitle(
+            from: "2. Soul Creation - Different Worlds (Kings Of Tomorrow Mix) (5-55).mp3",
+            artist: "Soul Creation", category: .singles) == "Different Worlds (Kings Of Tomorrow Mix)")
+        #expect(MetadataQuery.strippingDurationMarker(from: "Track (10:07)") == "Track")
+        #expect(MetadataQuery.strippingDurationMarker(from: "Track [4.20]") == "Track")
+    }
+
+    @Test func leavesRealParentheticalsAlone() {
+        #expect(MetadataQuery.strippingDurationMarker(from: "Track (Part 1-2)") == "Track (Part 1-2)")
+        #expect(MetadataQuery.strippingDurationMarker(from: "Anthem (1999-2000)") == "Anthem (1999-2000)")
+        #expect(MetadataQuery.strippingDurationMarker(from: "3 A.M. Eternal (Live At The S.S.L.)")
+                == "3 A.M. Eternal (Live At The S.S.L.)")
+    }
+
+    @Test func leavesATitleWithoutANumberedSegmentAlone() {
+        #expect(MetadataQuery.strippingTrackNumberSegment(from: "Track - Reprise") == "Track - Reprise")
+        #expect(MetadataQuery.strippingTrackNumberSegment(from: "Doggystyle - Crydamoure 2") == "Doggystyle - Crydamoure 2")
+    }
+}

@@ -430,10 +430,11 @@ enum DiscogsClient {
     /// reintroducing exactly the "nonsense structured term shadows a
     /// findable release" failure this function exists to fix.
     ///
-    /// If the primary combined search returns zero results, retries once
-    /// with just `track` (mix included) — dropping the artist rather than
-    /// any part of the title, since the title is the strongest identifying
-    /// signal here, not a redundant artist prefix. When
+    /// If the primary combined search returns zero results, retries with the
+    /// artist still attached but a trailing "(Mix)" dropped, then with just
+    /// `track` (mix included) — dropping the artist rather than any part of
+    /// the title, since the title is the strongest identifying signal here,
+    /// not a redundant artist prefix. When
     /// `allowArtistOnlyFallback` is false (the no-review batch lookup), that
     /// retry keeps only releases whose own artist matches
     /// (`releaseArtist(of:matches:)`), so it never applies a same-titled but
@@ -455,6 +456,17 @@ enum DiscogsClient {
 
         guard !artist.isEmpty, !track.isEmpty else {
             return TrackSearchResult(releases: [], usedBroaderTitleOnlyFallback: false)
+        }
+
+        // Still with the artist, but without a trailing "(Mix)" Discogs may
+        // not know — a weaker pressing match beats no match, and keeping the
+        // artist means this stays a full match, not a title-only one.
+        if let withoutMix = MetadataQuery.strippingTrailingParenthetical(from: track) {
+            let results = try await performSearch(
+                artist: "", track: combinedQuery(artist: artist, track: withoutMix), album: "", token: token)
+            if !results.isEmpty {
+                return TrackSearchResult(releases: results, usedBroaderTitleOnlyFallback: false)
+            }
         }
         // A title-only result whose own artist is this artist is as good as a
         // combined hit: listed first, and no "title only" warning. Without a

@@ -173,6 +173,8 @@ enum MetadataQuery {
             }
         }
 
+        name = strippingTrackNumberSegment(from: name)
+        name = strippingDurationMarker(from: name)
         name = name.replacingOccurrences(of: "_", with: " ")
         name = strippingIdentifierNumber(from: name)
         return strippingFeaturedArtist(from: strippingSceneGroupTag(from: name))
@@ -214,6 +216,39 @@ enum MetadataQuery {
             previous = current
         }
         return previous[second.count]
+    }
+
+    /// Drops everything up to and including a bare track number sitting
+    /// between dashes — "Klangkarussell - Sonnentanz - 04 - Sonnentanz
+    /// (Kellerkind Remix)" → "Sonnentanz (Kellerkind Remix)". Filenames
+    /// ripped as "Artist - Album - NN - Title" otherwise send the album
+    /// name and the track number to the provider as part of the title,
+    /// which finds nothing.
+    ///
+    /// Greedy, so the *last* such marker wins, and limited to three digits
+    /// so a year or an ID isn't read as a track number.
+    /// ponytail: a real title like "Blade Runner - 2 - Reprise" would lose
+    /// its first half.
+    static func strippingTrackNumberSegment(from title: String) -> String {
+        guard let range = title.range(of: #"^.*\s-\s\d{1,3}\s-\s"#, options: .regularExpression) else {
+            return title
+        }
+        let stripped = title.replacingCharacters(in: range, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? title : stripped
+    }
+
+    /// Drops a trailing duration someone wrote into the filename —
+    /// "Different Worlds (Kings Of Tomorrow Mix) (5-55)" → "… (Kings Of
+    /// Tomorrow Mix)". Written with a dash, a colon or a dot, since a
+    /// colon isn't legal in a Mac filename. Two digits after the separator,
+    /// so a real "(Part 1-2)" or "(1999-2000)" is left alone.
+    static func strippingDurationMarker(from title: String) -> String {
+        let pattern = #"\s*[\(\[]\s*\d{1,2}\s*[-:.]\s*\d{2}\s*[\)\]]\s*$"#
+        guard let range = title.range(of: pattern, options: .regularExpression) else { return title }
+        let stripped = title.replacingCharacters(in: range, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? title : stripped
     }
 
     /// Drops a standalone run of six or more digits — the download/store ID
