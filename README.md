@@ -23,6 +23,10 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
     ones this feature tagged last time.
 
   There is no undo for a tag write. The backup setting is the recovery path.
+- **Grouping in the info panel.** ⌘I now shows and edits the **Grouping** field, so you
+  can see the Maxi Track tag land and correct it by hand.
+- **Fixed:** the progress pill's text no longer wraps one letter per line while a
+  quality check runs.
 
 ---
 

@@ -9,7 +9,7 @@ import SwiftUI
 /// Pure logic behind the inspector, testable without SwiftUI: which value
 /// the selected files share per field, and what a set of edits writes.
 enum TrackInspector {
-    static let editableFields: [MetadataField] = [.title, .artist, .album, .year, .genre, .trackNumber]
+    static let editableFields: [MetadataField] = [.title, .artist, .album, .year, .genre, .trackNumber, .grouping]
 
     enum Shared: Equatable {
         case value(String)
@@ -24,6 +24,7 @@ enum TrackInspector {
         case .year: file.year
         case .genre: file.genre
         case .trackNumber: file.trackNumber
+        case .grouping: file.grouping
         default: nil
         }
         return value ?? ""
@@ -50,6 +51,7 @@ enum TrackInspector {
             case .year: changes.year = text
             case .genre: changes.genre = text
             case .trackNumber: changes.trackNumber = text
+            case .grouping: changes.grouping = text
             default: continue
             }
             changes.replacing.insert(field)

@@ -1287,6 +1287,10 @@ private struct JobProgressPill: View {
                         Text("· \(detail)").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                // The bar below is 180pt wide; without this the label row
+                // is squeezed to match it and wraps one letter per line.
+                .lineLimit(1)
+                .fixedSize()
                 ProgressView(value: Double(completed), total: Double(max(total, 1)))
                     .progressViewStyle(.linear)
                     .frame(width: 180)

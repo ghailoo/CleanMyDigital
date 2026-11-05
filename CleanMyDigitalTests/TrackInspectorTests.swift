@@ -34,6 +34,23 @@ struct TrackInspectorTests {
         #expect(items.filter { $0.key == "Title" }.count == 1)
     }
 
+    /// Grouping is where the Maxi Track tag lands, so the inspector has to
+    /// show it and be able to correct it by hand.
+    @Test func groupingIsEditableAndOverwrites() {
+        #expect(TrackInspector.editableFields.contains(.grouping))
+
+        var file = Self.file("a.flac", title: "Rapture", year: "2001")
+        file.grouping = "Maxi Track"
+        #expect(TrackInspector.value(of: .grouping, in: file) == "Maxi Track")
+
+        let changes = TrackInspector.changes(for: file, edits: [.grouping: "Classics"])
+        #expect(changes.grouping == "Classics")
+        #expect(changes.replaces(.grouping))   // a manual edit overwrites
+
+        // Re-typing what's already there writes nothing.
+        #expect(TrackInspector.changes(for: file, edits: [.grouping: "Maxi Track"]).isEmpty)
+    }
+
     private static func file(_ name: String, title: String?, year: String?) -> AudioFile {
         let url = URL(fileURLWithPath: "/Music/Maxi Priest/\(name)")
         return AudioFile(
