@@ -71,3 +71,55 @@ import Testing
         #expect(changes.replacing.isEmpty)   // never overwrites anything
     }
 }
+
+@Suite struct MaxiTrackNameEvidenceTests {
+    private static func makeFile(_ name: String, _ duration: TimeInterval) -> AudioFile {
+        let url = URL(fileURLWithPath: "/tmp/MaxiTrackPlannerTests/\(name)")
+        return AudioFile(
+            url: url, fileName: name, fileExtension: url.pathExtension,
+            sizeBytes: 1024, duration: duration, bitrateKbps: 1000,
+            title: nil, artist: "Artist", album: "Album", artworkThumbnail: nil,
+            year: "1999", genre: "House", trackNumber: nil, grouping: nil,
+            category: .singles, expectedArtist: nil, isReadable: true)
+    }
+
+    private static func certainty(_ name: String, _ duration: TimeInterval) -> MaxiTrackCertainty? {
+        MaxiTrackPlanner.plan(for: [makeFile(name, duration)]).first?.certainty
+    }
+
+    /// The whole point of this pass: a remix of a four-minute single is the
+    /// long pressing, and nothing in the old hint list said so.
+    @Test func aRemixCountsAsAMaxiTrack() {
+        #expect(Self.certainty("iiO - Rapture (John Creamer & Stephane K Remix).flac", 591) == .nameAgrees)
+        #expect(Self.certainty("iiO - Rapture (Deep Dish Miami Dub).flac", 648) == .nameAgrees)
+        #expect(Self.certainty("IIO - Rapture (Kenan Savrun Rework).wav", 518) == .nameAgrees)
+    }
+
+    /// A name that says "radio" or "original" just past four minutes is
+    /// taken at its word and never offered at all.
+    @Test func aShortFormNameJustOverFourMinutesIsLeftOut() {
+        #expect(Self.certainty("iiO - Rapture (Original Radio Mix).flac", 254) == nil)
+        #expect(Self.certainty("iiO - Rapture (Riva edit).flac", 245) == nil)
+        #expect(Self.certainty("Kadoc - The Nighttrain (Original).flac", 295) == nil)
+    }
+
+    /// Past five minutes the clock disagrees too loudly — it stays in the
+    /// list for a human to decide, but unticked.
+    @Test func aShortFormNameThatRunsLongIsStillWorthALook() {
+        #expect(Self.certainty("iiO - Rapture (original mix).flac", 407) == .durationOnly)
+        #expect(Self.certainty("Artist - Track (Radio Edit).flac", 400) == .durationOnly)
+    }
+
+    /// "Original Extended Mix" says both things; the maxi hint wins.
+    @Test func aMaxiHintOutranksAShortFormHint() {
+        #expect(Self.certainty("iiO - Rapture (Original Extended Mix).flac", 404) == .nameAgrees)
+        #expect(Self.certainty("iiO ft. Nadia Ali - Is It Love Inst Remix Remaster II (Original Mix).flac", 427) == .nameAgrees)
+    }
+
+    /// Hints match whole words: an artist called Dubfire isn't a dub, and
+    /// an "Editor's Cut" isn't an edit.
+    @Test func hintsMatchWholeWordsOnly() {
+        #expect(Self.certainty("Dubfire - Roadkill.flac", 300) == .durationOnly)
+        #expect(Self.certainty("Artist - Track (Editorial).flac", 250) == .durationOnly)
+    }
+}

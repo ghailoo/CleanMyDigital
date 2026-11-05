@@ -28,12 +28,25 @@ struct MaxiTrackProposal: Identifiable, Sendable {
 enum MaxiTrackPlanner {
     /// "Longer than 4 minutes", exclusive: a track of exactly 4:00 isn't one.
     static let minimumDuration: TimeInterval = 240
+    /// Under this, a name that calls itself a radio edit or the original
+    /// version is taken at its word and the file is left out altogether.
+    /// Past it the clock disagrees too loudly to ignore, so the file stays
+    /// in the list — unticked.
+    static let shortFormGrace: TimeInterval = 300
     static let groupingValue = "Maxi Track"
 
-    /// What a maxi version calls itself. Matched case-insensitively against
-    /// the filename and the Title tag.
+    /// What a maxi version calls itself. A remix, a rework or a dub is
+    /// almost always the long pressing, so it counts the same as "extended".
     static let nameHints = [
-        "maxi", "extended", "12 inch", "12inch", "12\"", "long version", "club mix",
+        "maxi", "extended", "remix", "rework", "dub", "long version",
+        "club mix", "vocal mix", "dance mix", "12 inch", "12inch", "12\"",
+    ]
+
+    /// What a *short* version calls itself. Only consulted when nothing in
+    /// the name says maxi, so "Original Extended Mix" still reads as a maxi.
+    static let shortFormHints = [
+        "radio", "edit", "original", "single version", "album version",
+        "short", "7 inch", "7inch", "7\"",
     ]
 
     static func plan(for files: [AudioFile]) -> [MaxiTrackProposal] {
@@ -46,15 +59,29 @@ enum MaxiTrackPlanner {
                   file.grouping?.isEmpty ?? true
             else { return nil }
 
-            return MaxiTrackProposal(
-                file: file,
-                certainty: nameSuggestsMaxi(file) ? .nameAgrees : .durationOnly)
+            if nameSuggestsMaxi(file) {
+                return MaxiTrackProposal(file: file, certainty: .nameAgrees)
+            }
+            if nameSuggestsShortForm(file), duration < shortFormGrace { return nil }
+            return MaxiTrackProposal(file: file, certainty: .durationOnly)
         }
     }
 
     static func nameSuggestsMaxi(_ file: AudioFile) -> Bool {
-        let haystack = [file.fileName, file.title ?? ""].joined(separator: " ")
-        return nameHints.contains { haystack.localizedCaseInsensitiveContains($0) }
+        hint(nameHints, matches: file)
+    }
+
+    static func nameSuggestsShortForm(_ file: AudioFile) -> Bool {
+        hint(shortFormHints, matches: file)
+    }
+
+    /// Whole words only, so "Dubfire" isn't a dub and "Editor" isn't an edit.
+    private static func hint(_ hints: [String], matches file: AudioFile) -> Bool {
+        let haystack = [file.fileName, file.title ?? ""].joined(separator: " ").lowercased()
+        let separated = String(haystack.map { $0.isLetter || $0.isNumber || $0 == "\"" ? $0 : " " })
+        let normalized = separated.split(separator: " ").joined(separator: " ")
+        let padded = " \(normalized) "
+        return hints.contains { padded.contains(" \($0) ") }
     }
 
     /// The tag write for one proposal.

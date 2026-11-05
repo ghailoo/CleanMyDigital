@@ -18,7 +18,7 @@ struct MaxiTracksSheetView: View {
     var body: some View {
         SheetWindowContainer(
             title: "Tag Maxi Tracks",
-            subtitle: "Writes \"\(MaxiTrackPlanner.groupingValue)\" into the Grouping tag of every track longer than four minutes.",
+            subtitle: "Writes \"\(MaxiTrackPlanner.groupingValue)\" into the Grouping tag of long tracks. Remixes, dubs and extended versions are ticked for you; radio edits and originals are left out.",
             windowID: "tag-maxi-tracks"
         ) {
             content
@@ -88,7 +88,7 @@ struct MaxiTracksSheetView: View {
         .font(.caption)
         .foregroundStyle(agrees ? .green : .orange)
         .help(agrees
-              ? "Longer than four minutes, and the name says it's an extended version"
+              ? "Longer than four minutes, and the name says so — a remix, dub or extended version"
               : "Longer than four minutes, but the name doesn't say either way")
     }
 
