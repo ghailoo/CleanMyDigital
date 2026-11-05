@@ -914,6 +914,7 @@ struct ContentView: View {
                 Button("Collect into Folders…") { openWindow(id: "collect-into-folders") }
             }
             Button("Find Duplicates…") { openWindow(id: "find-duplicates") }
+            Button("Tag Maxi Tracks…") { openWindow(id: "tag-maxi-tracks") }
             Divider()
             Button("Move All Fakes to Quarantine…") { showQuarantineConfirm = true }
                 .disabled(fakeFiles.isEmpty)

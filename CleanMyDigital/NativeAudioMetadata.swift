@@ -17,6 +17,7 @@ struct NativeAudioMetadata {
     var year: String?
     var genre: String?
     var trackNumber: String?
+    var grouping: String?
     var artworkData: Data?
     /// The size, in bytes, of just the audio-sample data — excluding the
     /// container header and every metadata/tag/artwork chunk. Lets bitrate

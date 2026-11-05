@@ -16,6 +16,7 @@ struct TagChanges: Sendable {
     var year: String?
     var genre: String?
     var trackNumber: String?
+    var grouping: String?
     var artworkJPEG: Data?
     /// The exceptions to "only fill empty fields": these fields replace an
     /// existing value. Only ever set by an explicit user action — a manual
@@ -31,6 +32,7 @@ struct TagChanges: Sendable {
         case .year: year
         case .genre: genre
         case .trackNumber: trackNumber
+        case .grouping: grouping
         default: nil
         }
         return value?.isEmpty == false ? value : nil
@@ -43,7 +45,7 @@ struct TagChanges: Sendable {
 
     var isEmpty: Bool {
         title == nil && artist == nil && album == nil && year == nil
-            && genre == nil && trackNumber == nil && artworkJPEG == nil
+            && genre == nil && trackNumber == nil && grouping == nil && artworkJPEG == nil
     }
 }
 

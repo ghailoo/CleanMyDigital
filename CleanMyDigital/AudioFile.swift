@@ -15,6 +15,10 @@ enum MetadataField: String, CaseIterable, Identifiable {
     case year = "Year"
     case genre = "Genre"
     case trackNumber = "Track Number"
+    /// ID3's "content group" (TIT1), and its equivalent in every other
+    /// format. Never required, never reported missing — written only by
+    /// "Tag Maxi Tracks".
+    case grouping = "Grouping"
 
     var id: String { rawValue }
 }
@@ -68,6 +72,8 @@ struct AudioFile: Identifiable, Sendable {
     let year: String?
     let genre: String?
     let trackNumber: String?
+    /// ID3 TIT1 and its equivalents — holds "Maxi Track" once tagged.
+    var grouping: String?
 
     let category: LibraryCategory
     /// The first-level folder name under the scanned root — the artist this
@@ -84,7 +90,9 @@ struct AudioFile: Identifiable, Sendable {
     /// Fields the scanner checks for this file's category — Singles don't
     /// require a Track Number, since maxi singles are often left untracked.
     private var applicableFields: [MetadataField] {
-        category == .singles ? MetadataField.allCases.filter { $0 != .trackNumber } : MetadataField.allCases
+        MetadataField.allCases.filter {
+            $0 != .grouping && !(category == .singles && $0 == .trackNumber)
+        }
     }
 
     var missingFields: [MetadataField] {

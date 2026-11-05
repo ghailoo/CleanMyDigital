@@ -233,6 +233,9 @@ private struct AlbumComparisonView: View {
             case .genre: return !release.combinedGenre.isEmpty
             case .artwork: return release.coverImageURL != nil || release.thumbURL != nil
             case .title, .trackNumber: return matchedTracks[file.url] != nil
+            // Grouping is never missing and never filled from a release —
+            // only "Tag Maxi Tracks" writes it.
+            case .grouping: return false
             }
         }
     }

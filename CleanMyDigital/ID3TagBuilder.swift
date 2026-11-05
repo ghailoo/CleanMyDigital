@@ -47,6 +47,9 @@ enum ID3TagBuilder {
             let (part, total) = TagWriteHelpers.parseTrackPosition(trackNumber)
             _ = builder.trackPosition(frame: ID3FramePartOfTotal(part: part, total: total))
         }
+        if let grouping = changes.grouping, isNew(.contentGrouping) || changes.replaces(.grouping) {
+            _ = builder.contentGrouping(frame: ID3FrameWithStringContent(content: grouping))
+        }
         if let artworkJPEG = changes.artworkJPEG, isNew(.attachedPicture(.frontCover)) {
             _ = builder.attachedPicture(
                 pictureType: .frontCover,

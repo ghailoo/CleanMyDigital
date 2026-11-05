@@ -29,6 +29,9 @@ enum ID3ChunkMetadata {
         if let f = tag.frames[.recordingYear] as? ID3FrameWithIntegerContent, let value = f.value {
             metadata.year = String(value)
         }
+        if let f = tag.frames[.contentGrouping] as? ID3FrameWithStringContent {
+            metadata.grouping = f.content
+        }
         if let f = tag.frames[.genre] as? ID3FrameGenre {
             metadata.genre = f.description ?? f.identifier.map { String(describing: $0) }
         }

@@ -49,6 +49,7 @@ enum FLACMetadataReader {
             metadata.album = value(for: "ALBUM")
             metadata.year = value(for: "DATE")
             metadata.genre = value(for: "GENRE")
+            metadata.grouping = value(for: "GROUPING")
             if let position = value(for: "TRACKNUMBER") {
                 if let total = value(for: "TRACKTOTAL") ?? value(for: "TOTALTRACKS"), !total.isEmpty {
                     metadata.trackNumber = "\(position)/\(total)"

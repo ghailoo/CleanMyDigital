@@ -37,6 +37,25 @@ struct FLACTagWriterTests {
         #expect(await Self.stringValue(.commonIdentifierAlbumName, in: metadata) == "Test Album")
     }
 
+    /// The write path behind "Tag Maxi Tracks" — the value has to survive a
+    /// round trip through the native reader, and never displace a grouping
+    /// the file already carries.
+    @Test func writesTheGroupingTagAndReadsItBack() async throws {
+        let flacURL = try Self.makeTestFLAC()
+        defer { try? FileManager.default.removeItem(at: flacURL) }
+
+        var changes = TagChanges()
+        changes.grouping = MaxiTrackPlanner.groupingValue
+        try FLACTagWriter.write(changes, to: flacURL)
+
+        #expect(try FLACMetadataReader.read(contentsOf: flacURL).grouping == "Maxi Track")
+
+        var second = TagChanges()
+        second.grouping = "Something Else"
+        try FLACTagWriter.write(second, to: flacURL)
+        #expect(try FLACMetadataReader.read(contentsOf: flacURL).grouping == "Maxi Track")
+    }
+
     @Test func neverOverwritesAnAlreadyPresentField() async throws {
         let flacURL = try Self.makeTestFLAC()
         defer { try? FileManager.default.removeItem(at: flacURL) }

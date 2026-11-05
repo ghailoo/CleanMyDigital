@@ -107,6 +107,7 @@ enum FLACTagWriter {
         let keys: [(MetadataField, String)] = [
             (.title, "TITLE"), (.artist, "ARTIST"), (.album, "ALBUM"),
             (.year, "DATE"), (.genre, "GENRE"), (.trackNumber, "TRACKNUMBER"),
+            (.grouping, "GROUPING"),
         ]
         for (field, key) in keys where changes.replaces(field) {
             comments.removeAll { $0.uppercased().hasPrefix(key + "=") }
@@ -117,6 +118,7 @@ enum FLACTagWriter {
         addIfMissing("DATE", changes.year)
         addIfMissing("GENRE", changes.genre)
         addIfMissing("TRACKNUMBER", changes.trackNumber)
+        addIfMissing("GROUPING", changes.grouping)
 
         var output = [UInt8]()
         func appendUInt32LE(_ value: Int) {

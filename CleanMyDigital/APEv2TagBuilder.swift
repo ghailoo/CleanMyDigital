@@ -23,6 +23,7 @@ enum APEv2TagBuilder {
     static let yearKey = "Year"
     static let genreKey = "Genre"
     static let trackKey = "Track"
+    static let groupingKey = "Grouping"
     static let coverArtFrontKey = "Cover Art (Front)"
 
     /// Field keys are conventionally case-insensitive (foobar2000, Mp3tag,
@@ -43,6 +44,7 @@ enum APEv2TagBuilder {
         let keys: [(MetadataField, String)] = [
             (.title, titleKey), (.artist, artistKey), (.album, albumKey),
             (.year, yearKey), (.genre, genreKey), (.trackNumber, trackKey),
+            (.grouping, groupingKey),
         ]
         for (field, key) in keys where changes.replaces(field) {
             items.removeAll { $0.key.caseInsensitiveCompare(key) == .orderedSame }
@@ -53,6 +55,7 @@ enum APEv2TagBuilder {
         addTextIfMissing(yearKey, changes.year)
         addTextIfMissing(genreKey, changes.genre)
         addTextIfMissing(trackKey, changes.trackNumber)
+        addTextIfMissing(groupingKey, changes.grouping)
 
         if let artworkJPEG = changes.artworkJPEG, !hasKey(coverArtFrontKey) {
             items.append(.coverArt(key: coverArtFrontKey, filename: "cover.jpg", data: artworkJPEG))
@@ -70,6 +73,7 @@ enum APEv2TagBuilder {
         metadata.year = APEv2TagBuilder.textValue(APEv2TagBuilder.yearKey, in: items)
         metadata.genre = APEv2TagBuilder.textValue(APEv2TagBuilder.genreKey, in: items)
         metadata.trackNumber = APEv2TagBuilder.textValue(APEv2TagBuilder.trackKey, in: items)
+        metadata.grouping = APEv2TagBuilder.textValue(APEv2TagBuilder.groupingKey, in: items)
 
         if let coverItem = items.first(where: {
             $0.key.caseInsensitiveCompare(APEv2TagBuilder.coverArtFrontKey) == .orderedSame

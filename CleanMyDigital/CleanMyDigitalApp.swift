@@ -42,6 +42,12 @@ struct CleanMyDigitalApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 760, height: 520)
 
+        WindowGroup("Tag Maxi Tracks", id: "tag-maxi-tracks") {
+            MaxiTracksSheetView(scanner: scanner)
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 760, height: 520)
+
         WindowGroup("Apply Found Matches", id: "apply-found-matches") {
             ApplyFoundMatchesSheetView(scanner: scanner)
         }

@@ -485,6 +485,34 @@ final class LibraryScanner {
         return data.flatMap(NSImage.init(data:))
     }
 
+    /// Writes the "Maxi Track" grouping tag to each proposal's file, one at
+    /// a time so a single bad file doesn't abandon the batch. Returns one
+    /// result per proposal, in the order given.
+    ///
+    /// No undo entry: this writes tags, not file moves, so the pre-write
+    /// backup (`BackupManager`) is what a mistake is recovered from — the
+    /// same as every other tag write in the app.
+    func tagMaxiTracks(_ proposals: [MaxiTrackProposal], backupFirst: Bool) async -> [RenameOperationResult] {
+        var results: [RenameOperationResult] = []
+        for proposal in proposals {
+            let name = proposal.file.fileName
+            do {
+                let softFailure = try await applyTagChanges(
+                    MaxiTrackPlanner.changes(for: proposal), to: proposal.file, backupFirst: backupFirst)
+                results.append(RenameOperationResult(
+                    originalURL: proposal.file.url, currentName: name,
+                    proposedName: MaxiTrackPlanner.groupingValue,
+                    errorDescription: softFailure?.errorDescription))
+            } catch {
+                results.append(RenameOperationResult(
+                    originalURL: proposal.file.url, currentName: name,
+                    proposedName: MaxiTrackPlanner.groupingValue,
+                    errorDescription: error.localizedDescription))
+            }
+        }
+        return results
+    }
+
     func applyTagChanges(_ changes: TagChanges, to file: AudioFile, backupFirst: Bool) async throws -> TagWriteError? {
         guard let fileRoot = root(containing: file.url) else {
             throw TagWriteError.underlying(CocoaError(.fileNoSuchFile))
@@ -1344,6 +1372,7 @@ final class LibraryScanner {
                 year: result.metadata.year,
                 genre: result.metadata.genre,
                 trackNumber: result.metadata.trackNumber,
+                grouping: result.metadata.grouping,
                 category: category,
                 expectedArtist: expectedArtist,
                 isReadable: true
@@ -1420,6 +1449,12 @@ final class LibraryScanner {
                 trackNumber: mergedTrackNumber(
                     avFoundation: await trackNumberValue(in: items),
                     native: native?.trackNumber),
+                grouping: mergedValue(
+                    avFoundation: await stringValue(
+                        in: items,
+                        identifiers: [.iTunesMetadataGrouping, .id3MetadataContentGroupDescription],
+                        keys: ["TIT1", "TT1", "©grp", "grouping", "GROUPING"]),
+                    native: native?.grouping),
                 category: category,
                 expectedArtist: expectedArtist,
                 isReadable: true

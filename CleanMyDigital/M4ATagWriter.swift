@@ -63,6 +63,7 @@ enum M4ATagWriter {
         let hasYear = await hasExisting(.iTunesMetadataReleaseDate)
         let hasGenre = await hasExisting(.iTunesMetadataUserGenre)
         let hasTrackNumber = await hasExisting(.iTunesMetadataTrackNumber)
+        let hasGrouping = await hasExisting(.iTunesMetadataGrouping)
         let hasArtwork = await hasExisting(.commonIdentifierArtwork)
 
         var newItems: [AVMetadataItem] = []
@@ -81,6 +82,9 @@ enum M4ATagWriter {
         }
         if let genre = changes.genre, !hasGenre || changes.replaces(.genre) {
             newItems.append(stringItem(.iTunesMetadataUserGenre, genre))
+        }
+        if let grouping = changes.grouping, !hasGrouping || changes.replaces(.grouping) {
+            newItems.append(stringItem(.iTunesMetadataGrouping, grouping))
         }
         if let trackNumber = changes.trackNumber, !hasTrackNumber || changes.replaces(.trackNumber) {
             let (part, total) = TagWriteHelpers.parseTrackPosition(trackNumber)
