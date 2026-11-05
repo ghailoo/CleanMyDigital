@@ -38,9 +38,15 @@ enum MaxiTrackPlanner {
     /// What a maxi version calls itself. A remix, a rework or a dub is
     /// almost always the long pressing, so it counts the same as "extended".
     static let nameHints = [
-        "maxi", "extended", "remix", "rework", "dub", "long version",
-        "club mix", "vocal mix", "dance mix", "12 inch", "12inch", "12\"",
+        "maxi", "extended", "remix", "rework", "dub", "mix", "long version",
+        "12 inch", "12inch", "12\"",
     ]
+
+    /// "Mix" on its own is evidence of a long version — unless it's the
+    /// short version's own name. A radio mix is a radio; an original mix is
+    /// an original. Rewritten before the hints are matched, so the file
+    /// still reads as short-form.
+    static let demotedPhrases = ["radio mix": "radio", "original mix": "original"]
 
     /// What a *short* version calls itself. Only consulted when nothing in
     /// the name says maxi, so "Original Extended Mix" still reads as a maxi.
@@ -79,7 +85,10 @@ enum MaxiTrackPlanner {
     private static func hint(_ hints: [String], matches file: AudioFile) -> Bool {
         let haystack = [file.fileName, file.title ?? ""].joined(separator: " ").lowercased()
         let separated = String(haystack.map { $0.isLetter || $0.isNumber || $0 == "\"" ? $0 : " " })
-        let normalized = separated.split(separator: " ").joined(separator: " ")
+        var normalized = separated.split(separator: " ").joined(separator: " ")
+        for (phrase, replacement) in demotedPhrases {
+            normalized = normalized.replacingOccurrences(of: phrase, with: replacement)
+        }
         let padded = " \(normalized) "
         return hints.contains { padded.contains(" \($0) ") }
     }

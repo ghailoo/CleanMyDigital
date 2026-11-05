@@ -116,6 +116,16 @@ import Testing
         #expect(Self.certainty("iiO ft. Nadia Ali - Is It Love Inst Remix Remaster II (Original Mix).flac", 427) == .nameAgrees)
     }
 
+    /// A bare "mix" counts too — but not when it's the short version's own
+    /// name, where "mix" is just the noun after "radio" or "original".
+    @Test func aBareMixCountsUnlessItIsARadioOrOriginalMix() {
+        #expect(Self.certainty("iiO - Rapture (Riva mix).flac", 461) == .nameAgrees)
+        #expect(Self.certainty("Kadoc - The Night Train (Merlyn's Cafe Sledge Mix).flac", 369) == .nameAgrees)
+        #expect(Self.certainty("iiO - Rapture (Original Radio Mix).flac", 254) == nil)
+        #expect(Self.certainty("Artist - Track (Original Mix).flac", 250) == nil)
+        #expect(Self.certainty("Artist - Track (Original Mix).flac", 407) == .durationOnly)
+    }
+
     /// Hints match whole words: an artist called Dubfire isn't a dub, and
     /// an "Editor's Cut" isn't an edit.
     @Test func hintsMatchWholeWordsOnly() {
