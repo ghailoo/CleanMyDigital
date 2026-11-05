@@ -5,6 +5,45 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.6
+
+- **Tag Maxi Tracks.** *Organize ▸ Tag Maxi Tracks…* writes **"Maxi Track"** into the
+  **Grouping** tag of every track that runs past four minutes, in any format the app
+  can write. Each row gets a confidence:
+  - **Name agrees** (green, ticked for you) — it's long *and* the name says so:
+    `remix`, `mix`, `dub`, `rework`, `extended`, `maxi`, `long version`, `12 inch`.
+  - **Length only** (yellow, left unticked) — long, but the name says nothing either
+    way. Read it before ticking.
+  - A name that calls itself a **radio edit**, an **original version** or just an
+    **edit** is taken at its word and left out of the list altogether, as long as it
+    runs under five minutes. Past that the clock disagrees too loudly, so it still
+    appears — unticked. A maxi hint outranks a short-form one, so *Original Extended
+    Mix* is still a maxi; "radio mix" and "original mix" are not.
+  - Files that already have something in Grouping are never touched, including the
+    ones this feature tagged last time.
+
+  There is no undo for a tag write. The backup setting is the recovery path.
+
+---
+
+## What's new in 1.5
+
+- **Found, or to review.** A search result is now scored against your file word for
+  word, in any order. Match 90% and it's **Found** (green). Match 80% and it's
+  **To review** (orange) — it appears in a new **To review** filter above the table,
+  and in Apply Found Matches it starts **unticked**, so nothing uncertain is written
+  unless you tick it. Below that it's no match at all, same as before.
+- Extra words on the provider's side count against a match: a file called
+  *Sonnentanz* against a release called *Sonnentanz Summer Sun Remixes Deluxe* is a
+  review, not a find.
+- A typo in your own tag no longer loses the match — *Kings Of Tommorow* still
+  finds *Kings Of Tomorrow*.
+- **More filename noise stripped before searching:** a track-number prefix
+  (`Artist - Album - 04 - Title`), a duration marker (`(5-55)`, `[4.20]`), and a
+  download-site watermark (`[www.slider.kz]`).
+
+---
+
 ## What's new in 1.4
 
 - **Drag and drop.** Drop a folder anywhere on the window to scan it — or drop a few
@@ -269,6 +308,11 @@ highest real quality (Lossless over Medium over Fake, then measured frequency cu
 then bitrate), and offers to move the rest into a `_CleanMyDigital Duplicates`
 folder. Nothing is ever deleted.
 
+**Tag Maxi Tracks…** — writes "Maxi Track" into the Grouping tag of everything longer
+than four minutes. Green rows (the name says remix, mix, extended, dub…) start ticked;
+yellow rows (long, but the name is silent) don't. Radio edits and originals under five
+minutes never appear. See *What's new in 1.6*.
+
 **Move All Fakes to Quarantine…** — after a quality check, moves every Fake file into
 a `_CleanMyDigital Quarantine` folder inside its scanned folder. Asks first; Undo
 puts them back. Nothing is ever deleted.
@@ -319,7 +363,7 @@ Fields you can name: `artist`, `title`, `album`, `genre`, `year`, `track`,
 format and the containing folder.
 
 The buttons above the table (Total, With issues, No metadata, Complete, Found,
-Fake) filter separately, and stack with whatever you've typed.
+To review, Fake) filter separately, and stack with whatever you've typed.
 
 ---
 
@@ -348,6 +392,9 @@ Differences that are only a format marker don't count: an Album of
 **Correct…** re-searches one file. **Re-match Album… / Re-match Compilation…** (in
 the folder header) re-searches the whole folder at once — use it when every track
 got the same wrong release.
+
+A match marked **To review** (orange) starts unticked: its name only partly agrees
+with your file, so it's never written unless you tick it yourself.
 
 Untick a file (or a whole folder) to leave it out; its card fades so you can see it
 won't be written. **Apply Selected Matches** writes the rest, one file at a time,
