@@ -27,6 +27,10 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
   can see the Maxi Track tag land and correct it by hand.
 - **Fixed:** the progress pill's text no longer wraps one letter per line while a
   quality check runs.
+- **Fixed:** a filename whose title sits inside the brackets
+  (`nikke nicole ( nikke does it better ) miller lite`) scored as no match, because
+  brackets are normally a mix name and get dropped before scoring. Both readings are
+  scored now and the better one wins.
 
 ---
 

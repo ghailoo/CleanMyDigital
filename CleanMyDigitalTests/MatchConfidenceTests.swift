@@ -53,6 +53,19 @@ import Testing
         #expect(confidence == .review)
     }
 
+    /// The real file: the title is *inside* the brackets, and a second
+    /// track's name trails it. Stripping brackets throws the title away.
+    @Test func aTitleInsideBracketsStillMatches() {
+        #expect(MatchScore.confidence(
+            fileName: "nikke nicole ( nikke does it better ) miller lite",
+            resultName: "Nikke Nicole - Nikke Does It Better") == .review)
+        // The trailing "miller lite" is a second track on the release, so it
+        // can't be confident — but it's the user's to tick, not a no-match.
+        #expect(MatchScore.confidence(
+            fileName: "nikke nicole ( nikke does it better )",
+            resultName: "Nikke? Nicole!* - Nikke Does It Better") == .confident)
+    }
+
     @Test func aDifferentReleaseIsNoMatch() {
         #expect(MatchScore.confidence(
             fileName: "Josh Wink Lil Louis French Kiss",

@@ -36,16 +36,28 @@ enum MatchScore {
     static let confidentThreshold = 0.9
     static let reviewThreshold = 0.8
 
+    /// Scored twice — once with the brackets dropped, once with them kept —
+    /// and the better reading wins. Usually a parenthetical is the mix name
+    /// and dropping it is what makes the match ("Finally (DJ Meri Mix)" →
+    /// "Finally"); but sometimes it *is* the title, as in
+    /// "nikke nicole (nikke does it better) miller lite", and dropping it
+    /// throws away the only words that matter.
     static func confidence(fileName: String, resultName: String) -> MatchConfidence {
-        let (coverage, balance) = percentages(fileName: fileName, resultName: resultName)
-        if balance >= confidentThreshold { return .confident }
-        if coverage >= reviewThreshold || balance >= reviewThreshold { return .review }
+        let readings = [true, false].map {
+            percentages(fileName: fileName, resultName: resultName, droppingBrackets: $0)
+        }
+        if readings.contains(where: { $0.balance >= confidentThreshold }) { return .confident }
+        if readings.contains(where: { $0.coverage >= reviewThreshold || $0.balance >= reviewThreshold }) {
+            return .review
+        }
         return .none
     }
 
-    static func percentages(fileName: String, resultName: String) -> (coverage: Double, balance: Double) {
-        let fileWords = words(in: fileName)
-        let resultWords = words(in: resultName)
+    static func percentages(
+        fileName: String, resultName: String, droppingBrackets: Bool = true
+    ) -> (coverage: Double, balance: Double) {
+        let fileWords = words(in: fileName, droppingBrackets: droppingBrackets)
+        let resultWords = words(in: resultName, droppingBrackets: droppingBrackets)
         guard !fileWords.isEmpty, !resultWords.isEmpty else { return (0, 0) }
 
         let shared = Double(sharedWordCount(fileWords, resultWords))
@@ -62,7 +74,7 @@ enum MatchScore {
     /// release, not the release, so counting it would push every maxi single
     /// below every threshold. Which pressing a file is stays the tracklist
     /// step's job (`DiscogsClient.firstRelease`), not this one's.
-    static func words(in name: String) -> [String] {
+    static func words(in name: String, droppingBrackets: Bool = true) -> [String] {
         // Per dash-separated part, because a credit runs only to the end of
         // the part it's in: stripping "Kings Of Tomorrow Feat. Julie McKnight
         // - Finally" whole would swallow the title along with the credit.
@@ -70,8 +82,10 @@ enum MatchScore {
             .components(separatedBy: " - ")
             .map { MetadataQuery.strippingFeaturedArtist(from: $0) }
             .joined(separator: " ")
-        let withoutBrackets = withoutCredits.replacingOccurrences(
-            of: #"[\(\[][^()\[\]]*[\)\]]"#, with: " ", options: .regularExpression)
+        let withoutBrackets = droppingBrackets
+            ? withoutCredits.replacingOccurrences(
+                of: #"[\(\[][^()\[\]]*[\)\]]"#, with: " ", options: .regularExpression)
+            : withoutCredits
         let folded = withoutBrackets.folding(
             options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         let separated = String(folded.map { $0.isLetter || $0.isNumber ? $0 : " " })
