@@ -36,8 +36,19 @@ enum APEv2TagBuilder {
         func hasKey(_ key: String) -> Bool {
             items.contains { $0.key.caseInsensitiveCompare(key) == .orderedSame }
         }
+        /// A text field counts as present only when it holds something — a
+        /// blank "Year" item is what a ripper leaves behind, not a value,
+        /// and treating it as one meant it could never be filled.
+        func hasTextValue(_ key: String) -> Bool {
+            items.contains {
+                $0.key.caseInsensitiveCompare(key) == .orderedSame
+                    && !($0.textValue ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            }
+        }
         func addTextIfMissing(_ key: String, _ value: String?) {
-            guard let value, !value.isEmpty, !hasKey(key) else { return }
+            guard let value, !value.isEmpty, !hasTextValue(key) else { return }
+            // Drop a blank one first, or the tag ends up carrying both.
+            items.removeAll { $0.key.caseInsensitiveCompare(key) == .orderedSame && !$0.isBinary }
             items.append(APEv2Tag.Item(key: key, isBinary: false, valueBytes: Array(value.utf8)))
         }
 

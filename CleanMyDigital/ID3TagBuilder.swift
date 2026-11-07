@@ -24,7 +24,15 @@ enum ID3TagBuilder {
             preserve(name: name, frame: frame, on: builder)
         }
 
-        func isNew(_ name: FrameName) -> Bool { existingFrames[name] == nil }
+        /// New, or there in name only: a frame holding an empty string is
+        /// what a ripper leaves behind, and counting it as a value meant a
+        /// blank Year or Genre could never be filled. Writing over it is
+        /// safe — the builder keys frames by name, so the blank one goes.
+        func isNew(_ name: FrameName) -> Bool {
+            guard let frame = existingFrames[name] else { return true }
+            guard let text = (frame as? ID3FrameWithStringContent)?.content else { return false }
+            return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
 
         if let title = changes.title, isNew(.title) || changes.replaces(.title) {
             _ = builder.title(frame: ID3FrameWithStringContent(content: title))

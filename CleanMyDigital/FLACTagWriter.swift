@@ -86,21 +86,24 @@ enum FLACTagWriter {
         try TagWriteHelpers.atomicReplace(Data(output), at: url)
     }
 
-    private static func mergeVorbisComment(existing: [UInt8]?, changes: TagChanges) -> [UInt8] {
-        var vendor: [UInt8]
-        var comments: [String]
-        if let existing {
-            (vendor, comments) = FLACStream.parseVorbisComment(existing)
-        } else {
-            vendor = Array("CleanMyDigital".utf8)
-            comments = []
-        }
-
+    /// The fill-if-missing rule itself, over a Vorbis comment list — pure,
+    /// so the rule can be tested without building a FLAC file.
+    static func merged(comments: [String], changes: TagChanges) -> [String] {
+        var comments = comments
+        /// A field counts as present only when it actually holds something.
+        /// Rippers leave "DATE=" behind, and treating that as a value meant
+        /// a blank Year could never be filled — the field looked taken.
         func hasField(_ name: String) -> Bool {
-            comments.contains { $0.uppercased().hasPrefix(name.uppercased() + "=") }
+            let prefix = name.uppercased() + "="
+            return comments.contains {
+                guard $0.uppercased().hasPrefix(prefix) else { return false }
+                return !$0.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces).isEmpty
+            }
         }
         func addIfMissing(_ name: String, _ value: String?) {
             guard let value, !value.isEmpty, !hasField(name) else { return }
+            // Drop a blank one first, or the file ends up with both.
+            comments.removeAll { $0.uppercased().hasPrefix(name.uppercased() + "=") }
             comments.append("\(name)=\(value)")
         }
 
@@ -119,6 +122,20 @@ enum FLACTagWriter {
         addIfMissing("GENRE", changes.genre)
         addIfMissing("TRACKNUMBER", changes.trackNumber)
         addIfMissing("GROUPING", changes.grouping)
+        return comments
+    }
+
+    private static func mergeVorbisComment(existing: [UInt8]?, changes: TagChanges) -> [UInt8] {
+        var vendor: [UInt8]
+        var comments: [String]
+        if let existing {
+            (vendor, comments) = FLACStream.parseVorbisComment(existing)
+        } else {
+            vendor = Array("CleanMyDigital".utf8)
+            comments = []
+        }
+
+        comments = merged(comments: comments, changes: changes)
 
         var output = [UInt8]()
         func appendUInt32LE(_ value: Int) {

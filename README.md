@@ -59,6 +59,17 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+- **Fixed: a blank tag is no longer mistaken for a filled one.** A ripper routinely
+  leaves `DATE=` behind with nothing after it. Every writer's fill-if-missing rule
+  read that as "already has a Year", so the field could never be filled and the file
+  sat on **With issues** forever, however many times you applied a match. FLAC,
+  APEv2 (WavPack/APE) and ID3 (MP3/AIFF/DSF) now treat an empty or whitespace-only
+  value as missing, and replace it rather than leaving two copies of the field.
+  M4A already behaved this way.
+  - The never-overwrite rule is unchanged: a field with a *real* value still stands.
+
+---
+
 ## What's new in 1.5
 
 - **Found, or to review.** A search result is now scored against your file word for
