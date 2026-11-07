@@ -44,25 +44,52 @@ enum MatchScore {
     /// throws away the only words that matter.
     static func confidence(fileName: String, resultName: String) -> MatchConfidence {
         let readings = [true, false].map {
-            percentages(fileName: fileName, resultName: resultName, droppingBrackets: $0)
+            scores(fileName: fileName, resultName: resultName, droppingBrackets: $0)
         }
         if readings.contains(where: { $0.balance >= confidentThreshold }) { return .confident }
-        if readings.contains(where: { $0.coverage >= reviewThreshold || $0.balance >= reviewThreshold }) {
-            return .review
-        }
+        if readings.contains(where: isWorthReviewing) { return .review }
         return .none
+    }
+
+    /// Either side being almost entirely accounted for is enough for a look.
+    /// The file's side covers a release that says more than the file does;
+    /// the *result's* side covers the opposite and commoner case — the file
+    /// carries a mix name the release never mentions
+    /// ("… Push The Feeling Belocca cheeky Bootleg" against the release
+    /// "… Push The Feeling On"). A one- or two-word release name is excluded
+    /// from that second test: swallowed by a long filename it means nothing.
+    private static func isWorthReviewing(_ s: Scores) -> Bool {
+        if s.coverage >= reviewThreshold || s.balance >= reviewThreshold { return true }
+        return s.resultWordCount >= 3 && s.resultCoverage >= reviewThreshold
+    }
+
+    private struct Scores {
+        var coverage = 0.0
+        var resultCoverage = 0.0
+        var balance = 0.0
+        var resultWordCount = 0
     }
 
     static func percentages(
         fileName: String, resultName: String, droppingBrackets: Bool = true
     ) -> (coverage: Double, balance: Double) {
+        let s = scores(fileName: fileName, resultName: resultName, droppingBrackets: droppingBrackets)
+        return (s.coverage, s.balance)
+    }
+
+    private static func scores(
+        fileName: String, resultName: String, droppingBrackets: Bool
+    ) -> Scores {
         let fileWords = words(in: fileName, droppingBrackets: droppingBrackets)
         let resultWords = words(in: resultName, droppingBrackets: droppingBrackets)
-        guard !fileWords.isEmpty, !resultWords.isEmpty else { return (0, 0) }
+        guard !fileWords.isEmpty, !resultWords.isEmpty else { return Scores() }
 
         let shared = Double(sharedWordCount(fileWords, resultWords))
-        return (coverage: shared / Double(fileWords.count),
-                balance: 2 * shared / Double(fileWords.count + resultWords.count))
+        return Scores(
+            coverage: shared / Double(fileWords.count),
+            resultCoverage: shared / Double(resultWords.count),
+            balance: 2 * shared / Double(fileWords.count + resultWords.count),
+            resultWordCount: resultWords.count)
     }
 
     /// The comparable words of a name: lowercased, unaccented, punctuation

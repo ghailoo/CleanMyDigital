@@ -66,6 +66,27 @@ import Testing
             resultName: "Nikke? Nicole!* - Nikke Does It Better") == .confident)
     }
 
+    /// The real file: the mix name rides *outside* any brackets, so the
+    /// file says much more than the release does — but every word of the
+    /// release is in the file.
+    @Test func aFileCarryingAMixNameStillMatchesTheRelease() {
+        #expect(MatchScore.confidence(
+            fileName: "The Nightcrawlers Push The Feeling Belocca cheeky Bootleg",
+            resultName: "The Nightcrawlers* - Push The Feeling On (Remixes)") == .review)
+
+        // A release name the file doesn't contain is still no match.
+        #expect(MatchScore.confidence(
+            fileName: "The Nightcrawlers Push The Feeling Belocca cheeky Bootleg",
+            resultName: "Fatboy Slim - Better Living Through Chemistry") == .none)
+
+        // A one- or two-word release name swallowed by a long filename is
+        // too weak to count — otherwise every file matches a release
+        // called "Love".
+        #expect(MatchScore.confidence(
+            fileName: "Daft Punk Around The World Love Something Else",
+            resultName: "Love") == .none)
+    }
+
     @Test func aDifferentReleaseIsNoMatch() {
         #expect(MatchScore.confidence(
             fileName: "Josh Wink Lil Louis French Kiss",
