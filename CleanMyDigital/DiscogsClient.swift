@@ -230,6 +230,41 @@ struct DiscogsTrack: Identifiable, Hashable, Sendable {
     let duration: String?
 
     var id: String { position + "|" + title }
+
+    /// Discogs writes "6:13", and occasionally "1:06:13" for a long mix.
+    /// Anything it can't read — an empty string, a stray word — is nil
+    /// rather than zero, so an unknown length never reads as a match.
+    var seconds: Int? {
+        guard let duration else { return nil }
+        let parts = duration.split(separator: ":")
+        guard (2...3).contains(parts.count) else { return nil }
+        var total = 0
+        for part in parts {
+            guard let value = Int(part), value >= 0 else { return nil }
+            total = total * 60 + value
+        }
+        return total
+    }
+}
+
+extension DiscogsReleaseDetail {
+    /// How far apart two timings can be and still be the same recording.
+    /// From the user's own tally over several days of matching by hand: a
+    /// correct pressing routinely reads 4-6 seconds off what the file
+    /// measures, because Discogs' times are rounded by whoever typed them
+    /// and rips differ in lead-in and fade. Seven gives that a little room
+    /// without reaching the next mix, which is usually half a minute away.
+    static let durationTolerance = 7
+
+    /// Whether this release lists a track as long as `duration`.
+    func hasTrack(ofDuration duration: TimeInterval) -> Bool {
+        guard duration > 0 else { return false }
+        let target = Int(duration.rounded())
+        return tracks.contains { track in
+            guard let seconds = track.seconds else { return false }
+            return abs(seconds - target) <= Self.durationTolerance
+        }
+    }
 }
 
 extension [DiscogsTrack] {

@@ -1141,6 +1141,31 @@ final class LibraryScanner {
     /// Searches Discogs first; only falls through to MusicBrainz if Discogs
     /// errored or its top candidate wouldn't fill any of this file's
     /// missing fields.
+    /// A name can lie — a bootleg is called whatever the ripper felt like —
+    /// but the clock can't. When the release is credited to this file's own
+    /// artist *and* its tracklist holds a track the same length as the file,
+    /// that's evidence the words alone couldn't give: a `.review` becomes a
+    /// `.confident`, and a result the words threw out comes back as a
+    /// `.review` for the user to judge.
+    ///
+    /// Only consulted when the words left room for doubt, so a match that
+    /// already reads confident costs no extra API request. The artist check
+    /// is what keeps this honest: without it, any release with a track of
+    /// the right length would qualify.
+    nonisolated private static func corroboratedByDuration(
+        _ confidence: MatchConfidence, file: AudioFile, release: DiscogsRelease,
+        artist: String, token: String
+    ) async -> MatchConfidence {
+        guard confidence != .confident,
+              let duration = file.duration, duration > 0,
+              !artist.isEmpty,
+              DiscogsClient.releaseArtist(of: release, matches: artist),
+              let detail = try? await DiscogsClient.releaseDetail(id: release.id, token: token),
+              detail.hasTrack(ofDuration: duration)
+        else { return confidence }
+        return confidence == .review ? .confident : .review
+    }
+
     nonisolated private static func lookupOutcome(
         for file: AudioFile, discogsToken: String, musicBrainzContact: String
     ) async -> LookupOutcome {
@@ -1181,8 +1206,10 @@ final class LibraryScanner {
             }
             if let releases, let top = releases.first {
                 let fillable = top.fillableFields(missing: missing)
-                let confidence = MatchScore.confidence(
+                let byName = MatchScore.confidence(
                     fileName: "\(query.artist) \(query.track)", resultName: top.title)
+                let confidence = await Self.corroboratedByDuration(
+                    byName, file: file, release: top, artist: query.artist, token: discogsToken)
                 if !fillable.isEmpty, confidence != .none {
                     return .found(provider: .discogs, candidate: .discogs(top),
                                   fillableFields: fillable, confidence: confidence)

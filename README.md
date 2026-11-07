@@ -38,6 +38,23 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.7
+
+- **The clock corroborates the match.** A name can lie — a bootleg is called whatever
+  the ripper felt like — but the length can't. When a Discogs result is credited to
+  your file's own artist *and* its tracklist holds a track the same length as the
+  file, the batch lookup promotes it: a **To review** becomes **Found**, and a result
+  the words alone threw out comes back as **To review**.
+  - Tolerance is **±7 seconds**, because a correct pressing routinely reads 4-6
+    seconds off what the file measures — Discogs' times are rounded by whoever typed
+    them, and rips differ in lead-in and fade.
+  - The artist has to match too. Without that, any release with a track of the right
+    length would qualify.
+  - Only checked when the words left doubt, so a match that already reads Found
+    costs no extra request.
+
+---
+
 ## What's new in 1.5
 
 - **Found, or to review.** A search result is now scored against your file word for
