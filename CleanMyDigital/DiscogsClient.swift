@@ -256,6 +256,19 @@ extension DiscogsReleaseDetail {
     /// without reaching the next mix, which is usually half a minute away.
     static let durationTolerance = 7
 
+    /// Whether this release's tracklist holds `track` *and* lists it at the
+    /// file's own length — the title and the clock agreeing on one entry.
+    /// Much stronger than either alone, and the case an album defeats: the
+    /// release is called "Lets Push It" while the file is "Just Like
+    /// Before", track 5 on it, so the release's own name says nothing.
+    func hasTrack(named track: String, ofDuration duration: TimeInterval) -> Bool {
+        guard duration > 0,
+              let matched = autoMatchedTrack(for: track),
+              let seconds = matched.seconds
+        else { return false }
+        return abs(seconds - Int(duration.rounded())) <= Self.durationTolerance
+    }
+
     /// Whether this release lists a track as long as `duration`.
     func hasTrack(ofDuration duration: TimeInterval) -> Bool {
         guard duration > 0 else { return false }

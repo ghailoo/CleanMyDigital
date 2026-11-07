@@ -48,6 +48,10 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
   - Tolerance is **±7 seconds**, because a correct pressing routinely reads 4-6
     seconds off what the file measures — Discogs' times are rounded by whoever typed
     them, and rips differ in lead-in and fade.
+  - **If the tracklist holds your track's title *and* its length, that's Found
+    outright.** This is what an album needs: a file called `Just Like Before` scores
+    nothing against a release named `Lets Push It`, even though it's track 5 on it —
+    the words only ever compared the file to the *release* name.
   - The artist has to match too. Without that, any release with a track of the right
     length would qualify.
   - Only checked when the words left doubt, so a match that already reads Found

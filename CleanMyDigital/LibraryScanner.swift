@@ -1154,15 +1154,23 @@ final class LibraryScanner {
     /// the right length would qualify.
     nonisolated private static func corroboratedByDuration(
         _ confidence: MatchConfidence, file: AudioFile, release: DiscogsRelease,
-        artist: String, token: String
+        artist: String, track: String, token: String
     ) async -> MatchConfidence {
         guard confidence != .confident,
               let duration = file.duration, duration > 0,
               !artist.isEmpty,
               DiscogsClient.releaseArtist(of: release, matches: artist),
-              let detail = try? await DiscogsClient.releaseDetail(id: release.id, token: token),
-              detail.hasTrack(ofDuration: duration)
+              let detail = try? await DiscogsClient.releaseDetail(id: release.id, token: token)
         else { return confidence }
+
+        // Right artist, and the tracklist holds this track at this length:
+        // nothing further to doubt, whatever the release itself is called.
+        // This is what an album needs — "Just Like Before" scores nothing
+        // against a release named "Lets Push It" that it's track 5 of.
+        if detail.hasTrack(named: track, ofDuration: duration) { return .confident }
+
+        // Only the clock agrees, on some track or other. Worth one step.
+        guard detail.hasTrack(ofDuration: duration) else { return confidence }
         return confidence == .review ? .confident : .review
     }
 
@@ -1209,7 +1217,8 @@ final class LibraryScanner {
                 let byName = MatchScore.confidence(
                     fileName: "\(query.artist) \(query.track)", resultName: top.title)
                 let confidence = await Self.corroboratedByDuration(
-                    byName, file: file, release: top, artist: query.artist, token: discogsToken)
+                    byName, file: file, release: top,
+                    artist: query.artist, track: query.track, token: discogsToken)
                 if !fillable.isEmpty, confidence != .none {
                     return .found(provider: .discogs, candidate: .discogs(top),
                                   fillableFields: fillable, confidence: confidence)
