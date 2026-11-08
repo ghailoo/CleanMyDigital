@@ -5,6 +5,23 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.7.3
+
+- **Codec names no longer poison the search.** A file called
+  `… (Junior's House Mix) DTS` was searched for *with* the `DTS` — which names the
+  digital format, not the recording, so neither provider has anything to match. The
+  marker is dropped from the search term now, bracketed anywhere or bare at the end:
+  `DTS`, `AC3`, `FLAC`, `WAV`, `MP3`, `M4A`, `AAC`, `OGG`, `WMA`, `ALAC`, `DSD`,
+  `SACD`, plus `320kbps`-style bitrates and `24bit`-style depths. Only those exact
+  words — a mix name like *(Radio Edit)* is untouched.
+- **A track number glued to the Artist tag is dropped too.** `02_Real McCoy` is
+  searched as *Real McCoy*. Narrow on purpose: two digits and a dot, dash or
+  underscore, never a space, so *2 Unlimited*, *2-4 Grooves* and *3 Doors Down* keep
+  their numbers.
+- Neither change touches your files — the search term only.
+
+---
+
 ## What's new in 1.6
 
 - **Tag Maxi Tracks.** *Organize ▸ Tag Maxi Tracks…* writes **"Maxi Track"** into the

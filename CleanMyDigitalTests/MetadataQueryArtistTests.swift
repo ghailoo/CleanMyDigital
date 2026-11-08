@@ -116,6 +116,19 @@ struct MetadataQueryArtistTests {
         #expect(MetadataQuery.artistParsedFromFileName("3 A.M. Eternal.flac") == nil)
     }
 
+    // MARK: - Ripper track-number prefix on the Artist tag
+
+    @Test func stripsATrackNumberPrefixFromTheArtistTag() {
+        let file = Self.makeFile(category: .singles, artist: "02_Real McCoy", expectedArtist: nil)
+        #expect(MetadataQuery.artist(for: file) == "Real McCoy")
+    }
+
+    @Test func keepsAnArtistThatGenuinelyStartsWithANumber() {
+        #expect(MetadataQuery.strippingTrackNumberPrefix(from: "2 Unlimited") == "2 Unlimited")
+        #expect(MetadataQuery.strippingTrackNumberPrefix(from: "2-4 Grooves") == "2-4 Grooves")
+        #expect(MetadataQuery.strippingTrackNumberPrefix(from: "3 Doors Down") == "3 Doors Down")
+    }
+
     // MARK: - Fixtures
 
     private static func makeFile(

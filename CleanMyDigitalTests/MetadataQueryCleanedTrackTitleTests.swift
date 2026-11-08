@@ -330,4 +330,31 @@ struct DownloadSiteTagTests {
         #expect(MetadataQuery.strippingDownloadSiteTag(from: "Finally (DJ Meri Mix)") == "Finally (DJ Meri Mix)")
         #expect(MetadataQuery.strippingDownloadSiteTag(from: "Mr. Vain (Club Mix)") == "Mr. Vain (Club Mix)")
     }
+
+    // MARK: - Codec / container markers
+
+    @Test func stripsABareTrailingCodecMarker() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "02_Real McCoy - Come & Get Your Love (Junior's House Mix) DTS.wav",
+            artist: "Real McCoy", category: .singles)
+        #expect(cleaned == "Come & Get Your Love (Junior's House Mix)")
+    }
+
+    @Test func stripsABracketedCodecMarker() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "Artist - Title [FLAC] (Club Mix).flac", artist: "Artist", category: .singles)
+        #expect(cleaned == "Title (Club Mix)")
+    }
+
+    @Test func stripsATrailingBitrateMarker() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "Artist - Title (Club Mix) - 320kbps.mp3", artist: "Artist", category: .singles)
+        #expect(cleaned == "Title (Club Mix)")
+    }
+
+    @Test func keepsAMixNameThatIsNotACodec() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "Artist - Title (Radio Edit).mp3", artist: "Artist", category: .singles)
+        #expect(cleaned == "Title (Radio Edit)")
+    }
 }

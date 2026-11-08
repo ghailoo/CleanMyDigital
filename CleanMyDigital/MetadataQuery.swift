@@ -46,7 +46,25 @@ enum MetadataQuery {
         let artist = file.category == .albums
             ? file.expectedArtist ?? file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
             : file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
-        return strippingFeaturedArtist(from: artist)
+        return strippingFeaturedArtist(from: strippingTrackNumberPrefix(from: artist))
+    }
+
+    /// Drops a ripper's track-number prefix glued onto an Artist tag —
+    /// "02_Real McCoy" → "Real McCoy". No provider indexes it, so the
+    /// artist term never matches anything.
+    ///
+    /// Far narrower than `strippingLeadingTrackNumber`: two digits and a
+    /// punctuation separator, never a space, so artists that genuinely
+    /// start with a number keep it — "2 Unlimited", "2-4 Grooves",
+    /// "3 Doors Down".
+    /// ponytail: a real artist named "12.Stones" would lose its prefix.
+    static func strippingTrackNumberPrefix(from artist: String) -> String {
+        guard let range = artist.range(of: #"^\s*\d{2}[._-]\s*"#, options: .regularExpression) else {
+            return artist
+        }
+        let stripped = artist.replacingCharacters(in: range, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? artist : stripped
     }
 
     /// Parses the artist out of an "Artist - Title" filename — the text
@@ -176,6 +194,7 @@ enum MetadataQuery {
         name = strippingTrackNumberSegment(from: name)
         name = strippingDownloadSiteTag(from: name)
         name = strippingDurationMarker(from: name)
+        name = strippingFormatMarker(from: name)
         name = name.replacingOccurrences(of: "_", with: " ")
         name = strippingIdentifierNumber(from: name)
         return strippingFeaturedArtist(from: strippingSceneGroupTag(from: name))
@@ -275,6 +294,29 @@ enum MetadataQuery {
         let stripped = title.replacingCharacters(in: range, with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return stripped.isEmpty ? title : stripped
+    }
+
+    /// Drops a codec/container marker a ripper wrote into the filename —
+    /// "Come & Get Your Love (Junior's House Mix) DTS" → "… (Junior's House
+    /// Mix)". It names the digital format, not the recording, so no provider
+    /// indexes it and it drags the whole query off the real title.
+    ///
+    /// Bracketed ones go wherever they sit; bare ones only at the very end,
+    /// and only after a separator, so a mix name keeps its words. The token
+    /// list is explicit codec/bitrate names — never an English word — so a
+    /// real title can't be eaten by it.
+    static func strippingFormatMarker(from title: String) -> String {
+        let token = #"(?:DTS(?:[\s-]*HD)?|AC-?3|FLAC|WAV|MP3|M4A|AAC|OGG|WMA|ALAC|DSD|SACD|\d{3}\s*kbps|\d{2}\s*-?\s*bits?)"#
+        var result = title
+        for pattern in [#"\s*[\(\[]\s*"# + token + #"\s*[\)\]]"#, #"[\s_\-]+"# + token + #"\s*$"#] {
+            while let range = result.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+                result = result.replacingCharacters(in: range, with: " ")
+            }
+        }
+        result = result
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.isEmpty ? title : result
     }
 
     /// Drops a standalone run of six or more digits — the download/store ID
