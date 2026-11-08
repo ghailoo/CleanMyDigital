@@ -240,7 +240,7 @@ struct MusicBrainzQuery {
 
     init(for file: AudioFile) {
         artist = MetadataQuery.artist(for: file)
-        recording = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
+        recording = MetadataQuery.trackSearchTerm(for: file, artist: artist)
         album = MetadataQuery.albumSearchTerm(for: file)
     }
 }

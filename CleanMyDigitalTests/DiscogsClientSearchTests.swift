@@ -304,7 +304,10 @@ struct DiscogsClientSearchTests {
         fileName: String = "01 Changes.mp3",
         artist: String? = "2Pac",
         expectedArtist: String? = "2Pac",
-        album: String?
+        album: String?,
+        // nil by default so these tests exercise the filename parsing they
+        // are about; `trackSearchTerm` prefers a Title tag when there is one.
+        title: String? = nil
     ) -> AudioFile {
         let url = URL(fileURLWithPath: "/Music/2Pac/Greatest Hits/\(fileName)")
         return AudioFile(
@@ -314,7 +317,7 @@ struct DiscogsClientSearchTests {
             sizeBytes: 1024,
             duration: 180,
             bitrateKbps: nil,
-            title: "Changes",
+            title: title,
             artist: artist,
             album: album,
             artworkThumbnail: nil,
@@ -325,5 +328,55 @@ struct DiscogsClientSearchTests {
             expectedArtist: expectedArtist,
             isReadable: true
         )
+    }
+
+    // MARK: - The Title tag leads, the filename backs it up
+
+    @Test func theTitleTagIsPreferredOverTheParsedFileName() {
+        let file = Self.makeFile(
+            category: .singles,
+            fileName: "207-offer_nissim_feat_maya-first_time__jose_spinnin_cortex_remix-nvs.mp3",
+            artist: "Offer Nissim Feat Maya",
+            expectedArtist: nil,
+            album: nil,
+            title: "First Time (Jose Spinnin Cortex Remix)")
+
+        let query = DiscogsQuery(for: file)
+        #expect(query.artist == "Offer Nissim")
+        #expect(query.track == "First Time (Jose Spinnin Cortex Remix)")
+        // The filename's own reading is kept for the retry tier.
+        #expect(query.fileNameTrack == "first time jose spinnin cortex remix")
+    }
+
+    @Test func aPlaceholderTitleTagIsIgnoredInFavourOfTheFileName() {
+        let file = Self.makeFile(
+            category: .singles, fileName: "The KLF - 3 A.M. Eternal.flac",
+            artist: "The KLF", expectedArtist: nil, album: nil, title: "Track 03")
+
+        #expect(DiscogsQuery(for: file).track == "3 A.M. Eternal")
+    }
+
+    @Test func thereIsNoFallbackTrackWhenBothReadingsAgree() {
+        let file = Self.makeFile(
+            category: .singles, fileName: "The KLF - 3 A.M. Eternal.flac",
+            artist: "The KLF", expectedArtist: nil, album: nil, title: "3 A.M. Eternal")
+
+        #expect(DiscogsQuery(for: file).fileNameTrack == nil)
+    }
+
+    @Test func aTitleTagKeepsALeadingNumberTheFileNameRulesWouldHaveEaten() {
+        let file = Self.makeFile(
+            category: .singles, fileName: "Youssou N'Dour - 7 Seconds.mp3",
+            artist: "Youssou N'Dour", expectedArtist: nil, album: nil, title: "7 Seconds")
+
+        #expect(DiscogsQuery(for: file).track == "7 Seconds")
+    }
+
+    @Test func aCodecMarkerInTheTitleTagIsStrippedToo() {
+        let file = Self.makeFile(
+            category: .singles, fileName: "Artist - Title.wav",
+            artist: "Artist", expectedArtist: nil, album: nil, title: "Come & Get Your Love DTS")
+
+        #expect(DiscogsQuery(for: file).track == "Come & Get Your Love")
     }
 }

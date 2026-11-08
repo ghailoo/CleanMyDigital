@@ -488,7 +488,8 @@ enum DiscogsClient {
     /// (`releaseArtist(of:matches:)`), so it never applies a same-titled but
     /// wrong track's release.
     static func searchTrack(
-        artist: String, track: String, token: String, allowArtistOnlyFallback: Bool = true
+        artist: String, track: String, token: String,
+        fallbackTrack: String? = nil, allowArtistOnlyFallback: Bool = true
     ) async throws -> TrackSearchResult {
         guard !token.isEmpty else { throw DiscogsError.missingToken }
 
@@ -506,6 +507,17 @@ enum DiscogsClient {
             return TrackSearchResult(releases: [], usedBroaderTitleOnlyFallback: false)
         }
 
+        // The filename's wording of the same title, when the tag's found
+        // nothing — a tag can be abbreviated, misspelled or name a different
+        // pressing than the file actually is. Still a full combined search,
+        // so this stays a match on both terms.
+        if let fallbackTrack, !fallbackTrack.isEmpty, fallbackTrack != track {
+            let results = try await performSearch(
+                artist: "", track: combinedQuery(artist: artist, track: fallbackTrack), album: "", token: token)
+            if !results.isEmpty {
+                return TrackSearchResult(releases: results, usedBroaderTitleOnlyFallback: false)
+            }
+        }
         // Still with the artist, but without a trailing "(Mix)" Discogs may
         // not know — a weaker pressing match beats no match, and keeping the
         // artist means this stays a full match, not a title-only one.
@@ -702,6 +714,13 @@ struct DiscogsQuery {
     /// see `MetadataQuery.albumSearchTerm(for:)`.
     let album: String
 
+    /// The *filename's* reading of the track title, when it differs from
+    /// `track` — i.e. when `track` came from the Title tag. Nil otherwise.
+    /// `DiscogsClient.searchTrack` retries with it when the tag's wording
+    /// finds nothing, so a wrong or over-abbreviated tag can't hide a
+    /// release the filename would have found.
+    let fileNameTrack: String?
+
     /// Compilations leave `artist` blank: Discogs credits a compilation to
     /// "Various" or to its compiler, never to one track's artist, so the
     /// release is searched by `album` alone (`DiscogsClient.searchCompilation`)
@@ -709,14 +728,11 @@ struct DiscogsQuery {
     /// still populated — it's what that tracklist match uses, and what the
     /// user needs to see to judge the result.
     init(for file: AudioFile) {
-        if file.category == .compilations {
-            artist = ""
-            track = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
-        } else {
-            let derivedArtist = MetadataQuery.artist(for: file)
-            artist = derivedArtist
-            track = MetadataQuery.cleanedTrackTitle(from: file.fileName, artist: derivedArtist, category: file.category)
-        }
+        artist = file.category == .compilations ? "" : MetadataQuery.artist(for: file)
+        track = MetadataQuery.trackSearchTerm(for: file, artist: artist)
+        let parsed = MetadataQuery.cleanedTrackTitle(
+            from: file.fileName, artist: artist, category: file.category)
+        fileNameTrack = parsed.isEmpty || parsed == track ? nil : parsed
         album = MetadataQuery.albumSearchTerm(for: file)
     }
 }

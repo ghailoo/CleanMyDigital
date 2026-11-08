@@ -436,8 +436,7 @@ private struct AlbumComparisonView: View {
             releaseDetail = detail
             var matches: [URL: DiscogsTrack] = [:]
             for file in group.files {
-                let cleaned = MetadataQuery.cleanedTrackTitle(
-                    from: file.fileName, artist: query.artist, category: group.category)
+                let cleaned = MetadataQuery.trackSearchTerm(for: file, artist: query.artist)
                 if let matched = detail.autoMatchedTrack(for: cleaned) {
                     matches[file.url] = matched
                 }
@@ -530,8 +529,7 @@ private struct AlbumComparisonView: View {
 
         var coveredIDs: Set<String> = []
         for file in group.files {
-            let cleaned = MetadataQuery.cleanedTrackTitle(
-                from: file.fileName, artist: query.artist, category: group.category)
+            let cleaned = MetadataQuery.trackSearchTerm(for: file, artist: query.artist)
             coveredIDs.formUnion(releaseDetail.allMatchedTracks(for: cleaned).map(\.id))
         }
 

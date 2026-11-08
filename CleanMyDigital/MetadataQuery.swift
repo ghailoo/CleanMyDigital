@@ -67,6 +67,49 @@ enum MetadataQuery {
         return stripped.isEmpty ? artist : stripped
     }
 
+    /// The track term every provider searches for: the file's **own Title
+    /// tag** when it has a usable one, and the parsed filename only when it
+    /// doesn't.
+    ///
+    /// The artist term has always preferred the tag; the track term never
+    /// did, which was the real cause of most "it finds nothing but I find it
+    /// by hand in one go" reports. A file tagged `First Time (Jose Spinnin
+    /// Cortex Remix)` was searched for as
+    /// `207-offer_nissim_feat_maya-first_time__jose_spinnin_cortex_remix-nvs`,
+    /// because the clean answer sitting in the file was never read. Scene
+    /// tags, store IDs, site watermarks, codec markers and duration markers
+    /// live in filenames, not in tags, so preferring the tag retires whole
+    /// classes of them at once instead of one regex at a time.
+    ///
+    /// The filename reading isn't thrown away — `DiscogsQuery.fileNameTrack`
+    /// carries it, and `DiscogsClient.searchTrack` retries with it when the
+    /// tag finds nothing. This app exists because tags are unreliable, so
+    /// the tag leads but never gets the last word.
+    static func trackSearchTerm(for file: AudioFile, artist: String) -> String {
+        usableTitleTag(of: file)
+            ?? cleanedTrackTitle(from: file.fileName, artist: artist, category: file.category)
+    }
+
+    /// The file's Title tag, lightly cleaned — or nil when it's missing,
+    /// blank, or a ripper's placeholder ("Track 03", "Audio Track",
+    /// "Untitled", a bare number), which is worth less than the filename.
+    ///
+    /// Only the three filename-agnostic strips are applied: a codec marker,
+    /// a site watermark and a "feat." credit all turn up in tags too. The
+    /// filename-specific rules are deliberately NOT run over a tag — the
+    /// leading-track-number strip alone would turn "7 Seconds" into
+    /// "Seconds" and "99 Problems" into "Problems".
+    static func usableTitleTag(of file: AudioFile) -> String? {
+        guard let raw = file.title?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+        else { return nil }
+        let placeholder = #"^(?:audio[\s._-]*)?tracks?[\s._-]*\d*$|^untitled\b|^\d+$"#
+        guard raw.range(of: placeholder, options: [.regularExpression, .caseInsensitive]) == nil
+        else { return nil }
+        let cleaned = strippingFeaturedArtist(
+            from: strippingFormatMarker(from: strippingDownloadSiteTag(from: raw)))
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
     /// Parses the artist out of an "Artist - Title" filename — the text
     /// before the first " - ", once a leading track number is stripped —
     /// for when a file has no Artist tag at all to fall back on. Nil when

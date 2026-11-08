@@ -5,6 +5,30 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.8
+
+- **The Title tag leads the search now.** The artist term has always preferred the
+  file's own Artist tag; the track term never did — it was always parsed out of the
+  filename, even when the file carried a perfectly clean Title. That was the real
+  reason a search you do by hand in one go came back **Not found** here: a file
+  tagged `First Time (Jose Spinnin Cortex Remix)` was being searched for as
+  `207-offer_nissim_feat_maya-first_time__jose_spinnin_cortex_remix-nvs`.
+  - Scene tags, store IDs, site watermarks, codec markers and duration markers live
+    in **filenames**, not in tags — so reading the tag first retires whole classes of
+    them at once.
+  - **The filename isn't thrown away.** When the tag's wording finds nothing, the
+    search retries with the filename's reading before giving up, so an abbreviated or
+    misspelled tag can't hide a release the filename would have found.
+  - A placeholder tag — `Track 03`, `Audio Track`, `Untitled`, a bare number — is
+    ignored and the filename is used instead.
+  - Filename-only rules are never run over a tag: they'd turn *7 Seconds* into
+    *Seconds*. A tag only has its codec marker, site watermark and "feat." credit
+    removed.
+- Applies to Discogs, MusicBrainz, the manual search sheet's prefilled boxes, and the
+  track-against-tracklist matching in album lookups.
+
+---
+
 ## What's new in 1.7.4
 
 - **Scene-style filenames are understood.** A name like

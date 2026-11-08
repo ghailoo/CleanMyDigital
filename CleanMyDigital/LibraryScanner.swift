@@ -1208,8 +1208,8 @@ final class LibraryScanner {
                 }
             } else {
                 releases = try? await DiscogsClient.searchTrack(
-                    artist: query.artist, track: query.track,
-                    token: discogsToken, allowArtistOnlyFallback: false
+                    artist: query.artist, track: query.track, token: discogsToken,
+                    fallbackTrack: query.fileNameTrack, allowArtistOnlyFallback: false
                 ).releases
             }
             if let releases, let top = releases.first {
