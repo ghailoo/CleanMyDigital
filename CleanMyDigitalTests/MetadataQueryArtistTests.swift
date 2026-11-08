@@ -129,6 +129,17 @@ struct MetadataQueryArtistTests {
         #expect(MetadataQuery.strippingTrackNumberPrefix(from: "3 Doors Down") == "3 Doors Down")
     }
 
+    // MARK: - Featured credit without a dot
+
+    @Test func stripsADotlessFeatCreditFromTheArtistTerm() {
+        let file = Self.makeFile(category: .singles, artist: "Offer Nissim Feat Maya", expectedArtist: nil)
+        #expect(MetadataQuery.artist(for: file) == "Offer Nissim")
+    }
+
+    @Test func aDotlessFeatIsNeverStrippedFromATitle() {
+        #expect(MetadataQuery.strippingFeaturedArtist(from: "The Feat Of Clay") == "The Feat Of Clay")
+    }
+
     // MARK: - Fixtures
 
     private static func makeFile(

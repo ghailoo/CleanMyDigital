@@ -5,6 +5,24 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.7.4
+
+- **Scene-style filenames are understood.** A name like
+  `207-offer_nissim_feat_maya-first_time__jose_spinnin_cortex_remix-nvs.mp3`
+  writes spaces as `_` and separates the artist with a bare `-`, so the app's
+  "Artist - Title" split never fired and the artist went into the search as part of
+  the track name. The name is rewritten into the normal shape first now, which makes
+  every existing rule work on it: artist split, trailing group tag, the lot.
+  - Only when a name has underscores and not one space — that pair is the
+    convention's signature. An ordinary name with a hyphen in it (`Hi-Fi Title`) is
+    not touched.
+- **A dotless "Feat" is dropped from the artist.** `Offer Nissim Feat Maya` is
+  searched as *Offer Nissim* — both providers credit a featured artist separately.
+  Artist terms only: a *title* like "The Feat Of Clay" would lose half its words, so
+  there a dot is still required.
+
+---
+
 ## What's new in 1.7.3
 
 - **Codec names no longer poison the search.** A file called

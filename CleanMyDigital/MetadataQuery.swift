@@ -46,7 +46,7 @@ enum MetadataQuery {
         let artist = file.category == .albums
             ? file.expectedArtist ?? file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
             : file.artist ?? artistParsedFromFileName(file.fileName) ?? ""
-        return strippingFeaturedArtist(from: strippingTrackNumberPrefix(from: artist))
+        return strippingFeaturedArtist(from: strippingTrackNumberPrefix(from: artist), dotOptional: true)
     }
 
     /// Drops a ripper's track-number prefix glued onto an Artist tag —
@@ -96,7 +96,34 @@ enum MetadataQuery {
         if let range = name.range(of: #"^\s*\(?\d{1,3}[\s._\-)]+"#, options: .regularExpression) {
             name.removeSubrange(range)
         }
+        return expandingSceneUnderscores(in: name)
+    }
+
+    /// Rewrites a scene-style filename into the "Artist - Title" shape the
+    /// rest of this file already understands —
+    /// `offer_nissim_feat_maya-first_time__jose_spinnin_cortex_remix` →
+    /// `offer nissim feat maya - first time jose spinnin cortex remix`.
+    ///
+    /// Scene rips write spaces as `_` and separate artist from title with a
+    /// bare `-`, so the " - " split, the trailing-dash fallback and every
+    /// other rule here silently did nothing and the artist stayed glued to
+    /// the title. One normalization up front is a smaller fix than teaching
+    /// each rule a second separator.
+    ///
+    /// Only when the name has underscores and not one space — that pair is
+    /// the convention's signature. Only the *first* bare dash becomes a
+    /// separator: scene names run `artist-title-group`, and the trailing
+    /// group tag is `strippingSceneGroupTag`'s job.
+    private static func expandingSceneUnderscores(in name: String) -> String {
+        guard name.contains("_"), !name.contains(" ") else { return name }
+        var name = name
+        if let dash = name.range(of: #"(?<=[^\s-])-(?=[^\s-])"#, options: .regularExpression) {
+            name = name.replacingCharacters(in: dash, with: " - ")
+        }
         return name
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The search term for `release_title` (Discogs) / `release:`
@@ -374,13 +401,18 @@ enum MetadataQuery {
     /// credit featured artists separately, never in the track title, so
     /// leaving it in turns a findable title into zero results. Mix names
     /// like "(Funk Vocal Version)" are kept — they pin the pressing.
-    static func strippingFeaturedArtist(from title: String) -> String {
+    ///
+    /// `dotOptional` also catches a dotless " Feat " — only ever passed for
+    /// an *artist* term ("Offer Nissim Feat Maya" → "Offer Nissim"), never a
+    /// title, where a real one like "The Feat Of Clay" would lose its half.
+    static func strippingFeaturedArtist(from title: String, dotOptional: Bool = false) -> String {
         // Outside brackets the dot (or "featuring") is required, so a real
         // title like "The Feat Of Clay" is left alone.
         // Accented spellings happen in the wild ("(féat. Dyme)").
         let feat = #"f[eéèê]at"#
+        let dot = dotOptional ? #"\.?"# : #"\."#
         let bracketedCredit = #"(?:"# + feat + #"\.?|ft\.?|"# + feat + #"uring)\s"#
-        let bareCredit = #"(?:"# + feat + #"\.|ft\.|"# + feat + #"uring)\s"#
+        let bareCredit = #"(?:"# + feat + dot + #"|ft"# + dot + #"|"# + feat + #"uring)\s"#
         return title
             .replacingOccurrences(of: #"\s*[\(\[]\s*"# + bracketedCredit + #"[^\)\]]*[\)\]]"#, with: "",
                                   options: [.regularExpression, .caseInsensitive])

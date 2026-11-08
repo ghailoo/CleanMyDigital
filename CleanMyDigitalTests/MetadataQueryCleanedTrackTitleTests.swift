@@ -357,4 +357,25 @@ struct DownloadSiteTagTests {
             from: "Artist - Title (Radio Edit).mp3", artist: "Artist", category: .singles)
         #expect(cleaned == "Title (Radio Edit)")
     }
+
+    // MARK: - Scene-style filenames (underscores, bare dashes)
+
+    @Test func splitsASceneStyleFileNameAtItsBareDash() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "207-offer_nissim_feat_maya-first_time__jose_spinnin_cortex_remix-nvs.mp3",
+            artist: "Offer Nissim", category: .singles)
+        #expect(cleaned == "first time jose spinnin cortex remix")
+    }
+
+    @Test func sceneStyleArtistIsParsedFromTheFileNameToo() {
+        #expect(MetadataQuery.artistParsedFromFileName(
+            "207-offer_nissim_feat_maya-first_time__jose_spinnin_cortex_remix-nvs.mp3")
+            == "offer nissim feat maya")
+    }
+
+    @Test func aNameWithSpacesIsNotTreatedAsSceneStyle() {
+        let cleaned = MetadataQuery.cleanedTrackTitle(
+            from: "Artist - Hi-Fi Title.mp3", artist: "Artist", category: .singles)
+        #expect(cleaned == "Hi-Fi Title")
+    }
 }
