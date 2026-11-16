@@ -89,6 +89,13 @@ enum CollectionPlanner {
             }
             guard !titled.isEmpty else { continue }
 
+            // Rule 0: never collect inside an ARTIST folder. Everything
+            // below assumes the scanned root is one artist, so skipping
+            // here is what stops a library-root scan from flattening
+            // Artist/Song/file into Root/Song/file — see
+            // `folderIsArtistsOwn`.
+            if let topFolderName, folderIsArtistsOwn(topFolderName, files: groupFiles) { continue }
+
             // Rule 3: a folder with several distinct songs (an A-side plus
             // B-sides) stays together under one song folder — picked by
             // whichever title the original folder name names, since that's
@@ -159,6 +166,59 @@ enum CollectionPlanner {
 
         planned = canonicalizingSongTitles(planned)
         return (finalizedProposals(for: planned, artistRoot: artistRoot), cleanFolders.sorted { $0.path < $1.path })
+    }
+
+    /// Whether `folderName` is the **artist's own folder** rather than a
+    /// release folder — which means the scanned root is a library root
+    /// holding many artists, not one artist's folder.
+    ///
+    /// Everything in this planner assumes the scanned root *is* the artist,
+    /// and reads the first folder level under it as a release. Scan a
+    /// parent of artist folders instead and each artist folder is taken for
+    /// one single's pressings: its files move to `Root/Song/Pressing/` and
+    /// the artist folder is removed once empty, flattening
+    /// `Artist/Song/file` into `Root/Song/file` and losing the artist level
+    /// altogether. Nothing else checked for this — Albums has
+    /// `detectArtistFolderOverride`, Singles had nothing.
+    ///
+    /// Deliberately an **exact** name match, never "contains": a release
+    /// folder legitimately begins with the artist ("Depeche Mode - Enjoy
+    /// The Silence"), and reading that as an artist folder would disable
+    /// collecting for the commonest naming style there is. A typo in a tag
+    /// still matches, via `isNearMatch`.
+    ///
+    /// A strict majority of the folder's files has to agree. An even split
+    /// is genuinely ambiguous — a release folder holding one artist/title
+    /// swapped tag reads exactly like a half-mistagged artist folder — and
+    /// the release reading is the commoner one. A real artist folder's tags
+    /// are near enough unanimous, and a big one is already skipped by
+    /// `maxDistinctSongsPerRelease` before this is reached.
+    static func folderIsArtistsOwn(_ folderName: String, files: [AudioFile]) -> Bool {
+        let folder = songKey(folderName)
+        guard !folder.isEmpty else { return false }
+
+        let artists = files.compactMap { file -> String? in
+            guard let raw = artistName(for: file) else { return nil }
+            let key = songKey(MetadataQuery.strippingFeaturedArtist(from: raw, dotOptional: true))
+            return key.isEmpty ? nil : key
+        }
+        guard !artists.isEmpty else { return false }
+
+        let agreeing = artists.filter { $0 == folder || MetadataQuery.isNearMatch($0, folder) }
+        return agreeing.count * 2 > artists.count
+    }
+
+    /// The first-level folders that are artist folders, not releases — what
+    /// the Collect window warns with. Without it a library-root scan just
+    /// shows an empty window with no explanation of why nothing is on offer.
+    static func artistFoldersMistakenForReleases(in files: [AudioFile]) -> [String] {
+        let singles = files.filter { $0.category == .singles }
+        return Dictionary(grouping: singles, by: \.expectedArtist)
+            .compactMap { name, group -> String? in
+                guard let name, folderIsArtistsOwn(name, files: group) else { return nil }
+                return name
+            }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     /// Above this many genuinely different songs, a folder is an album or a

@@ -5,6 +5,29 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.8.1
+
+- **Collect into Folders can no longer flatten an artist folder.** This fixes real
+  damage: scanning a folder that holds **many artist folders** (rather than one
+  artist's own folder) made Collect read each artist folder as if it were one
+  single's pressings. It moved the files to `Root/Song/Pressing/` and removed the
+  artist folder once it was empty — turning `Artist/Song/file` into `Root/Song/file`
+  and losing the artist level.
+  - Collect assumes **the folder you scanned is one artist's folder**, and reads the
+    first folder level under it as a release. Choose the artist folders themselves —
+    you can select several at once in *Choose Folder…*
+  - A folder whose name matches the Artist tag of the files inside it is now
+    recognised as an artist folder and skipped, and the Collect window says so
+    instead of sitting there empty.
+  - The check is an **exact** name match, never "contains", so a release folder named
+    after its artist (`Depeche Mode - Enjoy The Silence`) is still collected normally.
+- If this already happened to you: **nothing was deleted.** Files were moved, and a
+  folder was only removed once empty. *Undo Last Change* in the Collect window
+  reverses the whole run — but only while that session is alive, so don't rescan,
+  change category or quit the app first.
+
+---
+
 ## What's new in 1.8
 
 - **The Title tag leads the search now.** The artist term has always preferred the

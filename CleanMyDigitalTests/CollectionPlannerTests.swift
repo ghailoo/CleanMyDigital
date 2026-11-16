@@ -269,4 +269,64 @@ struct CollectionPlannerTests {
             isReadable: true
         )
     }
+
+    // MARK: - A library root is not an artist folder
+
+    /// The regression this file exists for now: scanning a folder that
+    /// holds many ARTIST folders (rather than one artist's own folder) made
+    /// the planner read each artist folder as one single's pressings. It
+    /// moved the files to `Root/Song/Pressing/` and removed the artist
+    /// folder once empty, flattening `Artist/Song/file` into
+    /// `Root/Song/file` and losing the artist level for good.
+    @Test func proposesNothingInsideAnArtistsOwnFolder() {
+        let root = "/Music/Singles"
+        let files = [
+            Self.makeFile(path: "\(root)/Real McCoy/Another Night.mp3",
+                          artistRoot: root, title: "Another Night", artist: "Real McCoy"),
+            Self.makeFile(path: "\(root)/Real McCoy/Run Away.mp3",
+                          artistRoot: root, title: "Run Away", artist: "Real McCoy"),
+        ]
+
+        #expect(CollectionPlanner.plan(for: files).isEmpty)
+        #expect(CollectionPlanner.artistFoldersMistakenForReleases(in: files) == ["Real McCoy"])
+    }
+
+    /// The guard must not fire on the commonest release-folder naming there
+    /// is, or it would switch the whole feature off.
+    @Test func aReleaseFolderNamedAfterTheArtistIsStillCollected() {
+        let root = "/Music/Depeche Mode"
+        let files = [
+            Self.makeFile(path: "\(root)/Depeche Mode - Enjoy The Silence (UK 12'')/01 Enjoy The Silence.mp3",
+                          artistRoot: root, title: "Enjoy The Silence (Hands And Feet Mix)", artist: "Depeche Mode"),
+        ]
+
+        #expect(CollectionPlanner.artistFoldersMistakenForReleases(in: files).isEmpty)
+        #expect(!CollectionPlanner.plan(for: files).isEmpty)
+    }
+
+    @Test func aMisspelledArtistTagStillIdentifiesTheArtistFolder() {
+        #expect(CollectionPlanner.folderIsArtistsOwn("Kings Of Tomorrow", files: [
+            Self.makeFile(path: "/M/Kings Of Tomorrow/A.mp3", artistRoot: "/M",
+                          title: "A", artist: "Kings Of Tommorow"),
+        ]))
+    }
+
+    @Test func oneMistaggedFileCannotVetoARealReleaseFolder() {
+        let root = "/Music/Moloko"
+        let files = [
+            Self.makeFile(path: "\(root)/Sing It Back/01 Sing It Back.mp3",
+                          artistRoot: root, title: "Sing It Back", artist: "Moloko"),
+            Self.makeFile(path: "\(root)/Sing It Back/02 Sing It Back (Boris Mix).mp3",
+                          artistRoot: root, title: "Sing It Back (Boris Musical Mix)", artist: "Sing It Back"),
+        ]
+
+        #expect(!CollectionPlanner.folderIsArtistsOwn("Sing It Back", files: files))
+    }
+
+    @Test func anArtistFolderWithNoArtistTagsAtAllIsLeftAlone() {
+        #expect(!CollectionPlanner.folderIsArtistsOwn("Real McCoy", files: [
+            Self.makeFile(path: "/M/Real McCoy/Another Night.mp3", artistRoot: "/M",
+                          title: "Another Night", artist: nil),
+        ]))
+    }
 }

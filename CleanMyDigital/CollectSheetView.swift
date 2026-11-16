@@ -13,6 +13,11 @@ struct CollectSheetView: View {
     @State private var isBusy = false
     @State private var errorsByURL: [URL: String] = [:]
     @State private var lastRunSummary: String?
+    /// First-level folders that are artist folders, not releases — the
+    /// scanned folder is a library root rather than one artist's folder.
+    /// Collecting skips those entirely, so without this the window would
+    /// just look empty for no stated reason.
+    @State private var artistFolders: [String] = []
 
     private var proposalCount: Int { plans.reduce(0) { $0 + $1.proposals.count } }
     private var selectedProposalCount: Int {
@@ -34,7 +39,20 @@ struct CollectSheetView: View {
 
     private var content: some View {
         Group {
-            if plans.isEmpty {
+            if !artistFolders.isEmpty, plans.isEmpty {
+                ContentUnavailableView {
+                    Label("That Looks Like a Library Folder", systemImage: "folder.badge.questionmark")
+                } description: {
+                    Text("""
+                        \(artistFolders.prefix(3).joined(separator: ", "))\
+                        \(artistFolders.count > 3 ? " and \(artistFolders.count - 3) more" : "") \
+                        \(artistFolders.count == 1 ? "is an artist's own folder" : "are artists' own folders"), \
+                        not releases. Collecting organizes the inside of one artist's folder, so choose the \
+                        artist folders themselves — you can select them all at once in Choose Folder…
+                        """)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if plans.isEmpty {
                 ContentUnavailableView {
                     Label("Nothing to Collect", systemImage: "checkmark.circle")
                 } description: {
@@ -124,6 +142,7 @@ struct CollectSheetView: View {
 
     private func rebuildPlan() {
         plans = CollectionPlanner.plan(for: scanner.files)
+        artistFolders = CollectionPlanner.artistFoldersMistakenForReleases(in: scanner.files)
         selectedArtists = Set(plans.map(\.artistRoot))
         errorsByURL = [:]
     }
