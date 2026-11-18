@@ -8,6 +8,27 @@ import Foundation
 @testable import CleanMyDigital
 
 struct RenamePlannerTests {
+    @Test func cleanedTitleTagDropsTrailingPackaging() {
+        let file = Self.makeFile(
+            path: "/Library/Singles/Lane 8/track.flac",
+            title: "Needed You (Original Mix) 125", artist: "Lane 8",
+            category: .singles)
+
+        #expect(RenamePlanner.cleanedTitleTag(for: file) == "Needed You (Original Mix)")
+    }
+
+    @Test func cleanedTitleTagIsNilWhenAlreadyClean() {
+        let clean = Self.makeFile(
+            path: "/Library/Singles/Lane 8/track.flac",
+            title: "Needed You (Original Mix)", artist: "Lane 8", category: .singles)
+        let noVersionGroup = Self.makeFile(
+            path: "/Library/Singles/Lane 8/other.flac",
+            title: "Brightest Lights (feat. POLIÇA)", artist: "Lane 8", category: .singles)
+
+        #expect(RenamePlanner.cleanedTitleTag(for: clean) == nil)
+        #expect(RenamePlanner.cleanedTitleTag(for: noVersionGroup) == nil)
+    }
+
     @Test func singlesTemplateIsArtistDashTitle() {
         let file = Self.makeFile(
             path: "/Library/Singles/808 State/track.flac",

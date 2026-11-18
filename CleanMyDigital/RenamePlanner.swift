@@ -24,6 +24,18 @@ struct RenameProposal: Identifiable, Sendable {
 /// filesystem-free (aside from reading the `AudioFile`s handed to it), so
 /// it's fully unit-testable: no I/O, no security-scoped access, no async.
 enum RenamePlanner {
+    /// The cleaned Title tag for `file`, when "also clean the Title tag"
+    /// would actually change it — nil when the tag is already clean, or
+    /// absent. Same trim the proposed filename gets, so what the rename
+    /// drops from the name is exactly what this drops from the tag.
+    static func cleanedTitleTag(for file: AudioFile) -> String? {
+        guard let title = file.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty
+        else { return nil }
+        let cleaned = MetadataQuery.trimmingAfterVersionGroup(title)
+        return cleaned == title ? nil : cleaned
+    }
+
     /// Builds proposals for every file across `files` that qualifies,
     /// grouped and collision-checked per folder (`files` don't need to be
     /// pre-filtered — only entries with both Artist and Title present ever

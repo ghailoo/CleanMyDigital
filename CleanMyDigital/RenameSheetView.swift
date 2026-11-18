@@ -8,6 +8,13 @@ import SwiftUI
 struct RenameSheetView: View {
     let scanner: LibraryScanner
 
+    /// Opt-in: also rewrite the Title tag to drop whatever a ripper glued
+    /// on after the mix name (Beatport's trailing BPM) — the same trim the
+    /// proposed filename gets. One of the few deliberate exceptions to
+    /// "only fill empty fields", so it stays off until asked for.
+    @AppStorage("cleanTitleTagOnRename") private var cleanTitleTag = false
+    @AppStorage("backupOriginalsBeforeWriting") private var backupOriginalsBeforeWriting = true
+
     @State private var proposals: [RenameProposal] = []
     @State private var selection: Set<URL> = []
     @State private var isBusy = false
@@ -66,6 +73,11 @@ struct RenameSheetView: View {
                     } else if proposal.isCaseOnlyChange {
                         Text("Case only").font(.caption2).foregroundStyle(.secondary)
                     }
+                    if cleanTitleTag, let cleaned = RenamePlanner.cleanedTitleTag(for: proposal.file) {
+                        Text("Title tag → \(cleaned)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -83,6 +95,10 @@ struct RenameSheetView: View {
                     .transition(.opacity)
             }
             Spacer()
+            Toggle("Clean the Title tag too", isOn: $cleanTitleTag)
+                .toggleStyle(.checkbox)
+                .help("Also rewrites the Title tag to drop anything after the mix name — a Beatport rip's trailing BPM, for example. Each change shows in the list before you rename.")
+                .disabled(isBusy)
             if scanner.canUndoLastFileOperation {
                 Button("Undo Last Change") { Task { await undo() } }
                     .accessibilityHint("Reverts the most recent rename, move, or collect")
@@ -122,6 +138,10 @@ struct RenameSheetView: View {
         defer { isBusy = false }
 
         let selected = proposals.filter { selection.contains($0.id) }
+        // Tags first, files second: both act on the pre-rename URL, and the
+        // proposed names were already derived from the trimmed title, so
+        // the resulting filenames are the same either way.
+        let titlesCleaned = cleanTitleTag ? await cleanTitleTags(of: selected) : 0
         let outcomes = await scanner.renameFiles(selected)
 
         var newErrors: [URL: String] = [:]
@@ -141,9 +161,33 @@ struct RenameSheetView: View {
         proposals.removeAll { succeededURLs.contains($0.id) }
         selection.subtract(succeededURLs)
 
-        lastRunSummary = failedCount == 0
+        let renamed = failedCount == 0
             ? "Renamed \(pluralized(succeededCount, "file"))."
             : "Renamed \(succeededCount), \(failedCount) failed."
+        lastRunSummary = titlesCleaned == 0
+            ? renamed
+            : renamed + " Cleaned \(pluralized(titlesCleaned, "Title tag"))."
+    }
+
+    /// Writes the trimmed Title back to every selected file that needs it.
+    /// A failure here is deliberately not surfaced per row: the rename is
+    /// the action the user asked for, and it still runs.
+    private func cleanTitleTags(of selected: [RenameProposal]) async -> Int {
+        var cleaned = 0
+        for proposal in selected {
+            guard let title = RenamePlanner.cleanedTitleTag(for: proposal.file) else { continue }
+            var changes = TagChanges()
+            changes.title = title
+            changes.replacing = [.title]
+            do {
+                _ = try await scanner.applyTagChanges(
+                    changes, to: proposal.file, backupFirst: backupOriginalsBeforeWriting)
+                cleaned += 1
+            } catch {
+                continue
+            }
+        }
+        return cleaned
     }
 
     private func undo() async {

@@ -5,6 +5,24 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.8.3
+
+- **Optional: clean the Title tag too.** 1.8.2 trimmed the trailing BPM out of the
+  proposed *filename* but left the tag alone. **Rename Files** now has a
+  **Clean the Title tag too** checkbox that writes the trimmed title back to the file —
+  `Needed You (Original Mix) 125` becomes `Needed You (Original Mix)` in the tag as
+  well as the name.
+  - **Off by default.** This is one of the few places the app overwrites a tag you
+    already have, alongside "Remove format suffixes from Album" and your own edits in
+    the inspector, so it only happens when you ask for it.
+  - Every affected row shows **Title tag → …** under its proposed name before you
+    rename, so you see each change first.
+  - The same trim as the filename, so the tag and the name never disagree.
+  - Backed up first, if "Back up originals before writing" is on, and reversible from
+    the backup like any other tag write.
+
+---
+
 ## What's new in 1.8.2
 
 - **Renaming drops whatever follows the mix name.** Beatport-style rips end the Title
