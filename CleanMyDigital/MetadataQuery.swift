@@ -106,7 +106,8 @@ enum MetadataQuery {
         guard raw.range(of: placeholder, options: [.regularExpression, .caseInsensitive]) == nil
         else { return nil }
         let cleaned = strippingFeaturedArtist(
-            from: strippingFormatMarker(from: strippingDownloadSiteTag(from: raw)))
+            from: trimmingAfterVersionGroup(
+                strippingFormatMarker(from: strippingDownloadSiteTag(from: raw))))
         return cleaned.isEmpty ? nil : cleaned
     }
 
@@ -364,6 +365,51 @@ enum MetadataQuery {
         let stripped = title.replacingCharacters(in: range, with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return stripped.isEmpty ? title : stripped
+    }
+
+    /// Drops whatever follows the last mix/version bracket group —
+    /// "Needed You (Original Mix) 125" → "Needed You (Original Mix)".
+    ///
+    /// Beatport-style rips glue the BPM onto the end of the Title tag, and
+    /// the same slot collects keys, store IDs and label names. The version
+    /// name is the last meaningful part of a track title, so anything past
+    /// it is packaging. Verified on the user's own files, where the BPM is
+    /// also already in a proper `BPM=` field — pure duplication.
+    ///
+    /// Anchored to the **last** version group, so a title carrying two
+    /// ("(Radio Edit) [Wyclef Remix]") keeps both. A title with no version
+    /// group at all is never touched: without one there's nothing to say
+    /// where the title ends, and guessing would eat real words.
+    static func trimmingAfterVersionGroup(_ title: String) -> String {
+        var lastEnd: String.Index?
+        var search = title.startIndex..<title.endIndex
+        while let range = title.range(
+            of: #"[\(\[][^()\[\]]*[\)\]]"#, options: .regularExpression, range: search) {
+            if isVersionGroup(String(title[range])) { lastEnd = range.upperBound }
+            search = range.upperBound..<title.endIndex
+        }
+        guard let lastEnd else { return title }
+        let trimmed = String(title[..<lastEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? title : trimmed
+    }
+
+    /// What a bracket group has to say to count as naming a version. A
+    /// generous list is the *safe* direction: the more groups are
+    /// recognised, the later the cut falls and the less is dropped.
+    static let versionWords = [
+        "mix", "mixes", "remix", "remixes", "rmx", "edit", "edits", "version",
+        "dub", "instrumental", "radio", "extended", "original", "club", "vocal",
+        "bootleg", "rework", "remaster", "remastered", "live", "acoustic",
+        "acapella", "cappella", "mashup", "vip", "reprise", "demo", "intro",
+        "outro", "clean", "dirty", "inch", "cut", "single", "12\"", "7\"",
+    ]
+
+    /// Whole words only, so "Dubfire" isn't a dub and "Editor" isn't an edit.
+    private static func isVersionGroup(_ group: String) -> Bool {
+        let inner = group.dropFirst().dropLast().lowercased()
+        let separated = String(inner.map { $0.isLetter || $0.isNumber || $0 == "\"" ? $0 : " " })
+        let padded = " " + separated.split(separator: " ").joined(separator: " ") + " "
+        return versionWords.contains { padded.contains(" \($0) ") }
     }
 
     /// Drops a codec/container marker a ripper wrote into the filename —

@@ -342,7 +342,11 @@ enum CollectionPlanner {
     /// Strips every trailing "(Club Mix)" / "[Wyclef Remix]" group — a title
     /// can carry both ("My Love Is Your Love (Radio Edit) [Wyclef Remix]").
     private static func strippingMixSuffix(from title: String) -> String {
-        var result = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Trailing packaging first ("(Original Mix) 125"), or the groups
+        // below aren't at the end to be stripped and the BPM becomes part
+        // of the song folder's name.
+        var result = MetadataQuery.trimmingAfterVersionGroup(title)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         while let range = result.range(of: #"\s*[\(\[][^()\[\]]*[\)\]]\s*$"#, options: .regularExpression) {
             let stripped = result.replacingCharacters(in: range, with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)

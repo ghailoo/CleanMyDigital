@@ -5,6 +5,27 @@ metadata, and helps you fill in the gaps from Discogs and MusicBrainz.
 
 ---
 
+## What's new in 1.8.2
+
+- **Renaming drops whatever follows the mix name.** Beatport-style rips end the Title
+  tag with the BPM — `Needed You (Original Mix) 125` — which the file already carries
+  properly in its own `BPM` field. Rename now proposes
+  `Camelphat, Vomee - Needed You (Original Mix).flac`. The same slot collects keys,
+  store IDs and label names; all of it goes.
+  - Cut at the **last** version group, so a title carrying two —
+    `(Radio Edit) [Wyclef Remix]` — keeps both.
+  - A title with **no** version group is never touched. Without one there's nothing to
+    say where the title ends, and guessing would eat real words:
+    `Close To You (US CDS Promo) (1990)` is left exactly as it is.
+  - Whole words only, so `(Dubfire)` isn't a dub and `(Editor)` isn't an edit.
+- Also applied to the **song folder name** in Collect into Folders, and to the
+  **search term** — since 1.8 the Title tag leads the search, so a trailing BPM was
+  going to Discogs along with the title.
+- Your tags are untouched, as always — this only changes the proposed filename, the
+  proposed folder name and what gets searched for.
+
+---
+
 ## What's new in 1.8.1
 
 - **Collect into Folders can no longer flatten an artist folder.** This fixes real

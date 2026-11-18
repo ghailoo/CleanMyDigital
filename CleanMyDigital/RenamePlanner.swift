@@ -95,7 +95,12 @@ enum RenamePlanner {
     /// caller, but re-checked here defensively) or sanitizes to empty.
     private static func templatedBaseName(for file: AudioFile) -> String? {
         guard let artist = sanitized(file.artist), !artist.isEmpty,
-              let title = sanitized(file.title), !title.isEmpty
+              // Whatever a ripper glued on after the mix name is packaging,
+              // not title: Beatport rips end the Title tag with the BPM
+              // ("Needed You (Original Mix) 125"), which the file also
+              // carries properly in its own BPM field.
+              let title = sanitized(file.title).map(MetadataQuery.trimmingAfterVersionGroup),
+              !title.isEmpty
         else { return nil }
 
         switch file.category {
@@ -126,7 +131,10 @@ enum RenamePlanner {
     /// The trailing parenthetical from the original filename — e.g. "(12"
     /// Mix)" — or nil if the filename doesn't end with one.
     private static func filenameMixSuffix(for file: AudioFile) -> String? {
-        let baseName = (file.fileName as NSString).deletingPathExtension
+        // Trimmed first, so a filename ending "(Original Mix) 125" still
+        // yields its mix name instead of none at all.
+        let baseName = MetadataQuery.trimmingAfterVersionGroup(
+            (file.fileName as NSString).deletingPathExtension)
         guard let range = baseName.range(of: #"\([^()]*\)\s*$"#, options: .regularExpression) else {
             return nil
         }

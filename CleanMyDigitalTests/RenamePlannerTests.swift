@@ -217,4 +217,43 @@ struct RenamePlannerTests {
             isReadable: true
         )
     }
+
+    // MARK: - Packaging after the mix name
+
+    /// Beatport rips end the Title tag with the BPM, which the file also
+    /// carries in a proper BPM field. Verified on the user's own files:
+    /// TITLE=Needed You (Original Mix) 125, BPM=125.
+    @Test func dropsABPMGluedOnAfterTheMixName() {
+        let file = Self.makeFile(
+            path: "/M/Camelphat, Vomee - Needed You (Original Mix) 125.flac",
+            title: "Needed You (Original Mix) 125",
+            artist: "Camelphat, Vomee", category: .singles)
+
+        #expect(RenamePlanner.plan(for: [file]).first?.proposedName
+            == "Camelphat, Vomee - Needed You (Original Mix).flac")
+    }
+
+    @Test func keepsASecondVersionGroupAfterTheFirst() {
+        #expect(MetadataQuery.trimmingAfterVersionGroup("My Love Is Your Love (Radio Edit) [Wyclef Remix]")
+            == "My Love Is Your Love (Radio Edit) [Wyclef Remix]")
+    }
+
+    @Test func leavesATitleWithNoVersionGroupCompletelyAlone() {
+        #expect(MetadataQuery.trimmingAfterVersionGroup("Close To You (US CDS Promo) (1990)")
+            == "Close To You (US CDS Promo) (1990)")
+        #expect(MetadataQuery.trimmingAfterVersionGroup("Thandaza (Feat. Alan Dixon)")
+            == "Thandaza (Feat. Alan Dixon)")
+    }
+
+    @Test func keepsAFeaturedCreditSittingBeforeTheMixName() {
+        #expect(MetadataQuery.trimmingAfterVersionGroup("Thandaza (Feat. Alan Dixon) (Original Mix) 123")
+            == "Thandaza (Feat. Alan Dixon) (Original Mix)")
+    }
+
+    @Test func aWordMerelyContainingAVersionWordIsNotAVersionGroup() {
+        // "Dubfire" is a producer, not a dub — so there is no version group
+        // here and the year after it stays.
+        #expect(MetadataQuery.trimmingAfterVersionGroup("Track (Dubfire) 1999")
+            == "Track (Dubfire) 1999")
+    }
 }
