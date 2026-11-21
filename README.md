@@ -11,9 +11,11 @@ prefixes, site watermarks, `(DTS)` codec markers, three copies of the same 12" u
 three different names. The app is designed around the fact that **real filenames are
 garbage and real tags are half-empty.**
 
+<!-- screenshot pending — see docs/screenshots/README.md
 <p align="center">
   <img src="docs/screenshots/main-window.png" alt="The results table after a scan, with missing fields highlighted per file" width="860">
 </p>
+-->
 
 ---
 
@@ -53,6 +55,7 @@ atomically, and originals are backed up first by default.
 
 ---
 
+<!-- screenshots pending — see docs/screenshots/README.md
 ## Screenshots
 
 | | |
@@ -63,6 +66,7 @@ atomically, and originals are backed up first by default.
 | ![Quality check](docs/screenshots/quality-check.png) | **Check Quality** — the spectrogram that tells a real FLAC from a transcoded MP3. |
 
 ---
+-->
 
 ## Guide
 
