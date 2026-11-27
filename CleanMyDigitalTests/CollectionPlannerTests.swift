@@ -382,6 +382,99 @@ struct CollectionPlannerTests {
         #expect(Set(names).count == 2, "a flat genre folder must not overwrite a same-named file")
     }
 
+    // MARK: - Collecting by genre: Albums and Compilations
+
+    @Test func albumsKeepArtistAndAlbumFoldersUnderTheGenre() {
+        let root = "/Music/Library"
+        let files = [
+            Self.makeFile(path: "\(root)/Air/Moon Safari (1998)/01 - La Femme d'Argent.flac",
+                          artistRoot: root, title: "La Femme d'Argent", category: .albums,
+                          artist: "Air", genre: "Electronic, Downtempo"),
+            Self.makeFile(path: "\(root)/Air/Moon Safari (1998)/02 - Sexy Boy.flac",
+                          artistRoot: root, title: "Sexy Boy", category: .albums,
+                          artist: "Air", genre: "Electronic, Downtempo"),
+        ]
+
+        let plans = CollectionPlanner.plan(
+            for: files, grouping: .genre, roots: [URL(fileURLWithPath: root)])
+        #expect(plans.map(\.artistFolderName) == ["Downtempo"])
+        #expect(plans.flatMap(\.proposals).map(\.proposedRelativePath).sorted() == [
+            "Air/Moon Safari (1998)/01 - La Femme d'Argent.flac",
+            "Air/Moon Safari (1998)/02 - Sexy Boy.flac",
+        ])
+    }
+
+    /// One mistagged track must not walk out of its album.
+    @Test func oneOddlyTaggedTrackTravelsWithItsAlbum() {
+        let root = "/Music/Library"
+        let album = "\(root)/Air/Moon Safari (1998)"
+        let files = [
+            Self.makeFile(path: "\(album)/01.flac", artistRoot: root, title: "One",
+                          category: .albums, artist: "Air", genre: "Downtempo"),
+            Self.makeFile(path: "\(album)/02.flac", artistRoot: root, title: "Two",
+                          category: .albums, artist: "Air", genre: "Downtempo"),
+            Self.makeFile(path: "\(album)/03.flac", artistRoot: root, title: "Three",
+                          category: .albums, artist: "Air", genre: "Hard Trance"),
+        ]
+
+        let plans = CollectionPlanner.plan(
+            for: files, grouping: .genre, roots: [URL(fileURLWithPath: root)])
+        #expect(plans.count == 1)
+        #expect(plans.first?.artistFolderName == "Downtempo")
+        #expect(plans.first?.proposals.count == 3)
+    }
+
+    @Test func compilationsMoveWholeAndKeepTheirOwnFolder() {
+        let root = "/Music/Compilations"
+        let files = [
+            Self.makeFile(path: "\(root)/Hotel Costes 10/01 - A.flac", artistRoot: root,
+                          title: "A", category: .compilations, artist: "Someone",
+                          genre: "Electronic, Downtempo"),
+            Self.makeFile(path: "\(root)/Hotel Costes 10/02 - B.flac", artistRoot: root,
+                          title: "B", category: .compilations, artist: "Another",
+                          genre: "Electronic, Lounge"),
+        ]
+
+        let plans = CollectionPlanner.plan(
+            for: files, grouping: .genre, roots: [URL(fileURLWithPath: root)])
+        #expect(plans.count == 1, "a compilation goes to one genre folder, not one per track")
+        #expect(plans.flatMap(\.proposals).map(\.proposedRelativePath).sorted() == [
+            "Hotel Costes 10/01 - A.flac",
+            "Hotel Costes 10/02 - B.flac",
+        ])
+    }
+
+    /// The reason `roots` is passed in rather than derived: an Albums scan
+    /// rooted at the artist folder has `expectedArtist` naming that folder
+    /// itself, so the artist-scheme derivation would put genre folders one
+    /// level ABOVE what was scanned.
+    @Test func genreFoldersAreNeverBuiltAboveTheScannedFolder() {
+        let root = "/Music/Air"
+        var file = Self.makeFile(
+            path: "\(root)/Moon Safari (1998)/01.flac", artistRoot: root, title: "One",
+            category: .albums, artist: "Air", genre: "Downtempo")
+        // What an artist-override scan produces: expectedArtist is the
+        // scanned folder's own name.
+        file = file.renamed(to: file.url, expectedArtist: .some("Air"))
+
+        let plans = CollectionPlanner.plan(
+            for: [file], grouping: .genre, roots: [URL(fileURLWithPath: root)])
+        let destination = try? #require(plans.first?.artistRoot.path)
+        #expect(destination == "/Music/Air/Downtempo")
+    }
+
+    @Test func albumsProposeNothingOnASecondRun() {
+        let root = "/Music/Library"
+        let files = [
+            Self.makeFile(path: "\(root)/Downtempo/Air/Moon Safari (1998)/01.flac",
+                          artistRoot: root, title: "One", category: .albums,
+                          artist: "Air", genre: "Downtempo"),
+        ]
+
+        #expect(CollectionPlanner.plan(
+            for: files, grouping: .genre, roots: [URL(fileURLWithPath: root)]).isEmpty)
+    }
+
     /// The artist scheme is the default, so every existing caller and the
     /// 1.8.1 library-root guard keep working untouched.
     @Test func groupingDefaultsToArtist() {

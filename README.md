@@ -245,17 +245,25 @@ writes. See the next section.
 `Artist - Title (Mix)`; Albums and Compilations become `01 Artist - Title`.
 Preview before applying.
 
-**Collect into Folders…** *(Singles only)* — a **Collect by** switch in the footer
-picks the scheme:
+**Collect into Folders…** — for Singles, a **Collect by** switch in the footer picks
+the scheme. Albums and Compilations always use Genre, since the Artist scheme reads
+the first folder level as one single's pressings.
 
-- **Artist** — `Artist/Song/Pressing/file`. Groups a track's different mixes and
-  pressings into a subfolder named after the release.
-- **Genre** — one flat folder per genre, e.g.
-  `Progressive House/Lane 8 - Needed You (Original Mix).flac`. Files by the **last**
-  value of the Genre tag, since Discogs orders them broad to specific and almost every
-  dance record starts with "Electronic". Every pressing of a song goes to the same
-  folder even when their tags disagree, filenames are left alone, tracks with no Genre
-  tag stay put, and nothing is deleted or swept up.
+- **Artist** *(Singles only)* — `Artist/Song/Pressing/file`. Groups a track's
+  different mixes and pressings into a subfolder named after the release.
+- **Genre** — files by the **last** value of the Genre tag, since Discogs orders them
+  broad to specific and almost every dance record starts with "Electronic". What goes
+  under the genre folder depends on what the genre is filing:
+  - **Singles** → `Progressive House/Lane 8 - Needed You (Original Mix).flac`, flat.
+  - **Albums** → `Downtempo/Air/Moon Safari (1998)/01 - Track.flac` — the release
+    moves whole, so scanning `Library/Downtempo/` afterwards works exactly as scanning
+    the library does.
+  - **Compilations** → `Lounge/Hotel Costes 10/01 - Track.flac`.
+
+  The genre is decided once per release by majority, so a single oddly-tagged track
+  never leaves its album and a song's pressings never split up. Filenames are left
+  alone, anything with no Genre tag stays put (the footer counts them), and nothing is
+  deleted or swept up — emptied folders are left for you to remove.
 
 **Find Duplicates…** — groups files sharing the same Artist and Title, keeps the
 highest real quality (Lossless over Medium over Fake, then measured frequency cutoff,

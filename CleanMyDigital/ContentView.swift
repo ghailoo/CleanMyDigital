@@ -910,9 +910,9 @@ struct ContentView: View {
     private var organizeMenu: some View {
         Menu {
             Button("Rename Files…") { openWindow(id: "rename-files") }
-            if selectedCategory == .singles {
-                Button("Collect into Folders…") { openWindow(id: "collect-into-folders") }
-            }
+            // Singles get both schemes; Albums and Compilations only the
+            // Genre one, which the window itself enforces.
+            Button("Collect into Folders…") { openWindow(id: "collect-into-folders") }
             Button("Find Duplicates…") { openWindow(id: "find-duplicates") }
             Button("Tag Maxi Tracks…") { openWindow(id: "tag-maxi-tracks") }
             Divider()

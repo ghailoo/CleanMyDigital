@@ -27,9 +27,22 @@ struct CollectSheetView: View {
     /// you'll keep organizing by.
     @AppStorage("collectGrouping") private var groupingRaw = CollectionPlanner.Grouping.artist.rawValue
 
+    /// Albums and Compilations only have the Genre scheme — the artist one
+    /// reads the first folder level as one single's pressings, which is
+    /// meaningless for a release folder. Forced rather than merely
+    /// disabled, so a stored "Artist" choice from a Singles session can't
+    /// leak into an Albums scan.
     private var grouping: CollectionPlanner.Grouping {
-        CollectionPlanner.Grouping(rawValue: groupingRaw) ?? .artist
+        guard scannedCategory == .singles else { return .genre }
+        return CollectionPlanner.Grouping(rawValue: groupingRaw) ?? .artist
     }
+
+    private var canChooseGrouping: Bool { scannedCategory == .singles }
+
+    /// The category this scan was run as. `LibraryScanner.category` is nil
+    /// before the first scan; Singles is the harmless default, since an
+    /// unscanned window has nothing to plan either way.
+    private var scannedCategory: LibraryCategory { scanner.category ?? .singles }
 
     private var proposalCount: Int { plans.reduce(0) { $0 + $1.proposals.count } }
     private var selectedProposalCount: Int {
@@ -39,9 +52,7 @@ struct CollectSheetView: View {
     var body: some View {
         SheetWindowContainer(
             title: "Collect into Folders",
-            subtitle: grouping == .artist
-                ? "Organizes each artist's Singles into Song Title/Pressing subfolders, using the Title tag."
-                : "Moves Singles into one flat folder per genre, using the last value of the Genre tag.",
+            subtitle: Self.subtitle(for: grouping, category: scannedCategory),
             windowID: "collect-into-folders"
         ) {
             content
@@ -49,6 +60,20 @@ struct CollectSheetView: View {
             footer
         }
         .onAppear { rebuildPlan() }
+    }
+
+    static func subtitle(
+        for grouping: CollectionPlanner.Grouping, category: LibraryCategory
+    ) -> String {
+        guard grouping == .genre else {
+            return "Organizes each artist's Singles into Song Title/Pressing subfolders, using the Title tag."
+        }
+        let layout = switch category {
+        case .singles: "one flat folder per genre"
+        case .albums: "Genre/Artist/Album folders, moving each album whole"
+        case .compilations: "Genre folders, moving each compilation whole"
+        }
+        return "Moves \(category.rawValue) into \(layout), using the last value of the Genre tag."
     }
 
     private var content: some View {
@@ -72,7 +97,7 @@ struct CollectSheetView: View {
                 } description: {
                     Text(grouping == .artist
                          ? "Every Singles folder is already organized, or its tracks are missing a Title tag."
-                         : "Every Single is already in its genre's folder, or none of them has a Genre tag. Run Find Metadata first to fill the genres in.")
+                         : "Everything is already in its genre's folder, or nothing has a Genre tag. Run Find Metadata first to fill the genres in.")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -118,16 +143,18 @@ struct CollectSheetView: View {
 
     private var footer: some View {
         HStack {
-            Picker("Collect by", selection: $groupingRaw) {
-                ForEach(CollectionPlanner.Grouping.allCases) { option in
-                    Text(option.rawValue).tag(option.rawValue)
+            if canChooseGrouping {
+                Picker("Collect by", selection: $groupingRaw) {
+                    ForEach(CollectionPlanner.Grouping.allCases) { option in
+                        Text(option.rawValue).tag(option.rawValue)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(isBusy)
+                .help("Artist builds Artist/Song/Pressing folders. Genre moves tracks into one flat folder per genre.")
+                .onChange(of: groupingRaw) { rebuildPlan() }
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .disabled(isBusy)
-            .help("Artist builds Artist/Song/Pressing folders. Genre moves tracks into one flat folder per genre.")
-            .onChange(of: groupingRaw) { rebuildPlan() }
 
             Text("\(selectedProposalCount) of \(proposalCount) selected")
                 .font(.callout)
@@ -175,7 +202,8 @@ struct CollectSheetView: View {
     }
 
     private func rebuildPlan() {
-        plans = CollectionPlanner.plan(for: scanner.files, grouping: grouping)
+        plans = CollectionPlanner.plan(
+            for: scanner.files, grouping: grouping, roots: scanner.scannedFolders)
         artistFolders = CollectionPlanner.artistFoldersMistakenForReleases(in: scanner.files)
         withoutGenre = CollectionPlanner.filesWithoutAGenre(in: scanner.files).count
         selectedArtists = Set(plans.map(\.artistRoot))

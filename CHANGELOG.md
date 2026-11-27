@@ -1,6 +1,35 @@
 # Changelog
 
-Every release, newest first. The current version is **1.9**.
+Every release, newest first. The current version is **1.9.1**.
+
+---
+
+## What's new in 1.9.1
+
+- **Collecting by Genre now works for Albums and Compilations too**, not just Singles.
+  **Collect into Folders** is no longer hidden outside Singles.
+- **Releases move whole.** Pulling individual tracks out into a flat genre folder would
+  tear an album apart, so for Albums and Compilations the *release* is the unit:
+  - **Albums** → `Genre/Artist/Album (Year)/tracks` — your existing layout with the
+    genre inserted above it. Nothing is lost, and scanning `Library/Genre/` afterwards
+    behaves exactly like scanning the library does today, Artist Mismatch and all.
+  - **Compilations** → `Genre/Compilation Folder/tracks`.
+  - **Singles** are unchanged: `Genre/file`, flat.
+- **The genre is decided once per release**, by majority, the same way pressings of a
+  single already shared one. A single oddly-tagged track can't walk out of its album.
+  Likewise a release with no genre on any track stays put, and a release with one
+  untagged track still travels together.
+- **Artist is Singles-only, and now says so.** The Collect by switch only appears for
+  Singles — the artist scheme reads the first folder level as one single's pressings,
+  which means nothing for a release folder. Outside Singles the Genre scheme is used
+  regardless of what you last picked, so a stored choice can't leak into an Albums scan.
+- **Fix:** collecting twice would have nested a release one level deeper each time
+  (`Genre/Genre/Artist/Album/`). An already-filed release is now recognised and left
+  alone, so a second run proposes nothing — the same guarantee the Artist scheme gives.
+- **Fix:** for an Albums scan rooted at an artist folder (the auto-detected or
+  "Rescan Treating This Folder as the Artist" case), the genre folders would have been
+  created one level **above** the folder you scanned. The window now passes the real
+  scanned folders in rather than deriving them.
 
 ---
 
