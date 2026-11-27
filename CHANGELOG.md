@@ -1,6 +1,25 @@
 # Changelog
 
-Every release, newest first. The current version is **1.8.3**.
+Every release, newest first. The current version is **1.8.4**.
+
+---
+
+## What's new in 1.8.4
+
+- **Genre gets filled now, even when the match can't supply one.** A MusicBrainz match
+  carries **no genre data at all** — MusicBrainz genres are user-voted and are empty for
+  most electronic and dance releases — so any file matched that way kept an empty Genre.
+  If Genre was the *only* missing field, the file was recorded as no-match and nothing
+  ever filled it.
+- Applying a match now gives Genre one more go, **searched by release instead of by
+  track**: artist + album first, then artist alone. Discogs genres are release-level, so
+  any pressing of the same record answers the question even when the track search found
+  nothing. You get genre and style together, as before — `Electronic, House, Deep House`.
+- Only ever for a Genre that is **genuinely empty**. This is still "fill, never
+  overwrite" — a file that already has a Genre is left alone.
+- **Never a guess.** If Discogs lists every candidate with no genre and no style, nothing
+  is written. The apply summary tells you how many Genres were looked up this way, so
+  you can see it happening.
 
 ---
 

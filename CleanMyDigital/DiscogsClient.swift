@@ -568,6 +568,40 @@ enum DiscogsClient {
     /// Combines an artist and a track title into one free-text search term
     /// — "Artist - Title", or just whichever of the two is non-empty.
     /// Factored out so it's verifiable without hitting the network.
+    /// A genre for a file whose match couldn't supply one — the first
+    /// matching release's genre+style, searched by artist and album rather
+    /// than by track.
+    ///
+    /// Deliberately *not* a repeat of the track search: this only runs
+    /// after a track-level match already came back without a genre (a
+    /// MusicBrainz match, which carries no genre data at all, or a Discogs
+    /// release Discogs itself lists ungenred), so re-asking the same
+    /// question would fail the same way. Searching by release instead
+    /// usually hits — Discogs genres are release-level, so any pressing of
+    /// the same record answers it.
+    ///
+    /// Tries artist+album first, then artist alone, since an album title
+    /// taken from a tag is often slightly off what Discogs calls the
+    /// release. Returns nil when Discogs has nothing, or lists every
+    /// candidate with no genre and no style at all — never a guess.
+    static func genre(artist: String, album: String, token: String) async throws -> String? {
+        guard !token.isEmpty, !artist.isEmpty else { return nil }
+        let albums = album.isEmpty ? [""] : [album, ""]
+        for album in albums {
+            let results = try await performSearch(
+                artist: artist, track: "", album: album, token: token)
+            if let genre = firstGenre(in: results) { return genre }
+        }
+        return nil
+    }
+
+    /// The first candidate that actually has a genre or style. Discogs
+    /// returns plenty of releases with both arrays empty, and they'd
+    /// otherwise shadow a perfectly good genre two results down.
+    static func firstGenre(in results: [DiscogsRelease]) -> String? {
+        results.map(\.combinedGenre).first { !$0.isEmpty }
+    }
+
     static func combinedQuery(artist: String, track: String) -> String {
         [artist, track].filter { !$0.isEmpty }.joined(separator: " - ")
     }

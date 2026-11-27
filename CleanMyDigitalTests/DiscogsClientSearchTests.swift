@@ -253,6 +253,28 @@ struct DiscogsClientSearchTests {
         #expect(!result.usedBroaderTitleOnlyFallback)
     }
 
+    // MARK: - Genre backfill
+
+    @Test func firstGenreSkipsUngenredResultsAndJoinsGenreWithStyle() {
+        func release(_ genre: [String]?, _ style: [String]?) -> DiscogsRelease {
+            DiscogsRelease(
+                id: 1, title: "A - B", year: nil, genre: genre, style: style,
+                label: nil, format: nil, thumb: nil, coverImage: nil)
+        }
+
+        let results = [release(nil, nil), release([], []), release(["Electronic"], ["Deep House"])]
+        #expect(DiscogsClient.firstGenre(in: results) == "Electronic, Deep House")
+    }
+
+    @Test func firstGenreIsNilWhenNoResultHasOne() {
+        let bare = DiscogsRelease(
+            id: 1, title: "A - B", year: nil, genre: nil, style: nil,
+            label: nil, format: nil, thumb: nil, coverImage: nil)
+
+        #expect(DiscogsClient.firstGenre(in: [bare, bare]) == nil)
+        #expect(DiscogsClient.firstGenre(in: []) == nil)
+    }
+
     // MARK: - searchURL for the compilation shape
 
     @Test func searchURLForTheCompilationShapeSendsArtistAndReleaseTitleButNoTrack() throws {

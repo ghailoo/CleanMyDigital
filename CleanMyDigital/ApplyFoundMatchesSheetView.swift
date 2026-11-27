@@ -791,6 +791,7 @@ struct ApplyFoundMatchesSheetView: View {
         applyTotalCount = files.count
         applyCompletedCount = 0
         var appliedCount = 0
+        var genresBackfilled = 0
         var appliedWithoutBackupCount = 0
         var alreadyCompleteCount = 0
         var failedCount = 0
@@ -805,6 +806,19 @@ struct ApplyFoundMatchesSheetView: View {
                    let cleaned = MetadataQuery.strippingFormatSuffix(from: file.album) {
                     changes.album = cleaned
                     changes.replacing = [.album]
+                }
+                // A MusicBrainz match carries no genre at all, and Discogs
+                // lists some releases ungenred, so the field the match
+                // couldn't fill gets one more go — by release rather than
+                // by track. Only ever for a Genre that's actually empty,
+                // so this stays inside "fill, never overwrite".
+                if changes.genre == nil, file.missingFields.contains(.genre),
+                   let genre = try? await DiscogsClient.genre(
+                       artist: changes.artist ?? file.artist ?? "",
+                       album: changes.album ?? file.album ?? "",
+                       token: discogsToken) {
+                    changes.genre = genre
+                    genresBackfilled += 1
                 }
                 guard !changes.isEmpty else {
                     outcomesByURL[file.url] = .alreadyComplete
@@ -828,6 +842,7 @@ struct ApplyFoundMatchesSheetView: View {
         }
 
         applySummary = Self.summaryText(
+            genresBackfilled: genresBackfilled,
             applied: appliedCount, appliedWithoutBackup: appliedWithoutBackupCount,
             alreadyComplete: alreadyCompleteCount, failed: failedCount, total: files.count)
 
@@ -838,9 +853,13 @@ struct ApplyFoundMatchesSheetView: View {
     /// without-backup/already-complete/failed counts are nonzero — same
     /// wording pattern as `AlbumComparisonView.applySummaryText`.
     private static func summaryText(
+        genresBackfilled: Int = 0,
         applied: Int, appliedWithoutBackup: Int, alreadyComplete: Int, failed: Int, total: Int
     ) -> String {
         var parts = ["Applied to \(applied) of \(pluralized(total, "file"))"]
+        if genresBackfilled > 0 {
+            parts.append("\(pluralized(genresBackfilled, "Genre")) looked up separately")
+        }
         if appliedWithoutBackup > 0 { parts.append("\(appliedWithoutBackup) without a backup") }
         if alreadyComplete > 0 { parts.append("\(alreadyComplete) already complete") }
         if failed > 0 { parts.append("\(failed) failed") }
