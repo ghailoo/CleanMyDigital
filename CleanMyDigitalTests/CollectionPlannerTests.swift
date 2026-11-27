@@ -240,7 +240,8 @@ struct CollectionPlannerTests {
         artistRoot: String,
         title: String?,
         category: LibraryCategory = .singles,
-        artist: String? = nil
+        artist: String? = nil,
+        genre: String? = "Electronic"
     ) -> AudioFile {
         let url = URL(fileURLWithPath: path)
         let rootComponents = URL(fileURLWithPath: artistRoot).standardizedFileURL.pathComponents
@@ -262,12 +263,136 @@ struct CollectionPlannerTests {
             album: "Album",
             artworkThumbnail: nil,
             year: "2000",
-            genre: "Electronic",
+            genre: genre,
             trackNumber: nil,
             category: category,
             expectedArtist: expectedArtist,
             isReadable: true
         )
+    }
+
+    // MARK: - Collecting by genre
+
+    @Test func genreFolderUsesTheLastValueOfAMultiValuedTag() {
+        let file = Self.makeFile(
+            path: "/Music/Singles/Artist/track.flac", artistRoot: "/Music/Singles",
+            title: "Track", artist: "Artist",
+            genre: "Electronic, Trance, House, Progressive House")
+
+        #expect(CollectionPlanner.genreFolderName(for: file) == "Progressive House")
+    }
+
+    @Test func genreFolderSanitizesTheSlashInValuesLikeFunkSoul() {
+        let file = Self.makeFile(
+            path: "/Music/Singles/Artist/track.flac", artistRoot: "/Music/Singles",
+            title: "Track", artist: "Artist", genre: "Electronic, Funk / Soul")
+
+        // "/" can't appear in a folder name at all.
+        let name = try? #require(CollectionPlanner.genreFolderName(for: file))
+        #expect(name?.contains("/") == false)
+    }
+
+    @Test func genreFolderIsNilWithoutAGenreTag() {
+        for genre in [nil, "", "  ", ","] {
+            let file = Self.makeFile(
+                path: "/Music/Singles/Artist/track.flac", artistRoot: "/Music/Singles",
+                title: "Track", artist: "Artist", genre: genre)
+            #expect(CollectionPlanner.genreFolderName(for: file) == nil)
+        }
+    }
+
+    @Test func genreGroupingMovesTracksIntoOneFlatFolderPerGenre() {
+        let root = "/Music/Singles"
+        let files = [
+            Self.makeFile(path: "\(root)/Lane 8/Needed You.flac", artistRoot: root,
+                          title: "Needed You", artist: "Lane 8",
+                          genre: "Electronic, Deep House"),
+            Self.makeFile(path: "\(root)/Bassomatic/Fascinating Rhythm.flac", artistRoot: root,
+                          title: "Fascinating Rhythm", artist: "Bassomatic",
+                          genre: "Electronic, Downtempo"),
+        ]
+
+        let plans = CollectionPlanner.plan(for: files, grouping: .genre)
+        #expect(plans.map(\.artistFolderName) == ["Deep House", "Downtempo"])
+        // Flat: the destination is just the filename under the genre folder.
+        #expect(plans.flatMap(\.proposals).map(\.proposedRelativePath).sorted()
+                == ["Fascinating Rhythm.flac", "Needed You.flac"])
+        // Nothing is swept up or deleted in this scheme.
+        #expect(plans.allSatisfy { $0.sourceFoldersToClean.isEmpty })
+    }
+
+    /// The real-library case: three pressings of one track whose tags
+    /// disagree about the genre. Deciding per file would scatter them.
+    @Test func pressingsOfOneSongShareAGenreFolderEvenWhenTheirTagsDisagree() {
+        let root = "/Music/Singles"
+        let files = [
+            Self.makeFile(path: "\(root)/Bassomatic/a/Fascinating Rhythm (Loud Edit).flac",
+                          artistRoot: root, title: "Fascinating Rhythm (Loud Edit)",
+                          artist: "Bassomatic", genre: "House"),
+            Self.makeFile(path: "\(root)/Bassomatic/b/Fascinating Rhythm (Hook Mix).flac",
+                          artistRoot: root, title: "Fascinating Rhythm (Hook Mix)",
+                          artist: "Bassomatic", genre: "House"),
+            Self.makeFile(path: "\(root)/Bassomatic/c/Fascinating Rhythm (Caniggia Mix).flac",
+                          artistRoot: root, title: "Fascinating Rhythm (Caniggia Mix)",
+                          artist: "Bassomatic", genre: "Electronic, Funk / Soul, Downtempo"),
+        ]
+
+        let plans = CollectionPlanner.plan(for: files, grouping: .genre)
+        #expect(plans.count == 1)
+        #expect(plans.first?.artistFolderName == "House")
+        #expect(plans.first?.proposals.count == 3)
+    }
+
+    @Test func genreGroupingLeavesFilesWithNoGenreWhereTheyAre() {
+        let root = "/Music/Singles"
+        let files = [
+            Self.makeFile(path: "\(root)/Artist/tagged.flac", artistRoot: root,
+                          title: "Tagged", artist: "Artist", genre: "House"),
+            Self.makeFile(path: "\(root)/Artist/untagged.flac", artistRoot: root,
+                          title: "Untagged", artist: "Artist", genre: nil),
+        ]
+
+        let plans = CollectionPlanner.plan(for: files, grouping: .genre)
+        #expect(plans.flatMap(\.proposals).map(\.file.fileName) == ["tagged.flac"])
+        #expect(CollectionPlanner.filesWithoutAGenre(in: files).map(\.fileName) == ["untagged.flac"])
+    }
+
+    @Test func genreGroupingProposesNothingOnASecondRun() {
+        let root = "/Music/Singles"
+        let files = [
+            Self.makeFile(path: "\(root)/House/Needed You.flac", artistRoot: root,
+                          title: "Needed You", artist: "Lane 8", genre: "House"),
+        ]
+
+        #expect(CollectionPlanner.plan(for: files, grouping: .genre).isEmpty)
+    }
+
+    @Test func genreGroupingDisambiguatesTwoArtistsSameFileName() {
+        let root = "/Music/Singles"
+        let files = [
+            Self.makeFile(path: "\(root)/Lane 8/track.flac", artistRoot: root,
+                          title: "One", artist: "Lane 8", genre: "House"),
+            Self.makeFile(path: "\(root)/Yotto/track.flac", artistRoot: root,
+                          title: "Two", artist: "Yotto", genre: "House"),
+        ]
+
+        let names = CollectionPlanner.plan(for: files, grouping: .genre)
+            .flatMap(\.proposals).map(\.proposedFileName).sorted()
+        #expect(names.count == 2)
+        #expect(Set(names).count == 2, "a flat genre folder must not overwrite a same-named file")
+    }
+
+    /// The artist scheme is the default, so every existing caller and the
+    /// 1.8.1 library-root guard keep working untouched.
+    @Test func groupingDefaultsToArtist() {
+        let root = "/Music/Depeche Mode"
+        let files = [
+            Self.makeFile(path: "\(root)/Enjoy The Silence/a.flac", artistRoot: root,
+                          title: "Enjoy The Silence", artist: "Depeche Mode"),
+        ]
+
+        #expect(CollectionPlanner.plan(for: files).map(\.proposedPathsForTest)
+                == CollectionPlanner.plan(for: files, grouping: .artist).map(\.proposedPathsForTest))
     }
 
     // MARK: - A library root is not an artist folder
@@ -329,4 +454,8 @@ struct CollectionPlannerTests {
                           title: "Another Night", artist: nil),
         ]))
     }
+}
+
+private extension ArtistCollectionPlan {
+    var proposedPathsForTest: [String] { proposals.map(\.proposedRelativePath).sorted() }
 }

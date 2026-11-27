@@ -1,6 +1,36 @@
 # Changelog
 
-Every release, newest first. The current version is **1.8.4**.
+Every release, newest first. The current version is **1.9**.
+
+---
+
+## What's new in 1.9
+
+- **Collect into Folders can now collect by Genre.** A new **Collect by** switch in the
+  window footer: **Artist** is the scheme you already have
+  (`Artist/Song/Pressing/file`), **Genre** moves tracks into one flat folder per
+  genre — `Progressive House/Lane 8 - Needed You (Original Mix).flac`. Your choice is
+  remembered between launches.
+- **It uses the *last* value of the Genre tag.** Discogs orders them broad to specific
+  — `Electronic, Trance, House, Progressive House` — and nearly every dance record
+  starts with "Electronic", so filing by the first value would put your whole library
+  in one folder. The last value is the one worth filing under. It also sidesteps the
+  `/` in values like `Funk / Soul`, which can't appear in a folder name.
+- **Every pressing of a song stays together.** Three pressings of one track routinely
+  disagree about their genre — two saying `House` and the third
+  `Electronic, Funk / Soul, Downtempo` is a real example — so the genre is decided
+  once per song, by majority, not per file. Ties break alphabetically, so a re-run
+  proposes the same thing.
+- **Filenames are not changed**, same as the Artist scheme — Collect moves files, it
+  doesn't rename them. Run **Rename Files** first if the names need it. Two same-named
+  files from different artists meeting in one genre folder get the artist appended
+  rather than one overwriting the other.
+- **Tracks with no Genre tag stay exactly where they are**, and the footer says how
+  many. Nothing is dumped into an "Unknown" bucket. Run **Find Metadata** first to
+  fill the genres in — see 1.8.4.
+- **Nothing is deleted or swept up in this scheme.** Unlike the Artist scheme, emptied
+  folders are left behind for you to remove, and loose artwork or cue files are not
+  moved — many song folders feed one genre folder, so their covers would collide.
 
 ---
 

@@ -43,11 +43,31 @@ struct ArtistCollectionPlan: Identifiable, Sendable {
 /// carries a distinguishing descriptor. Pure and filesystem-free, like
 /// `RenamePlanner`; the caller (`LibraryScanner`) does the actual I/O.
 enum CollectionPlanner {
+    /// What the top level of the collected layout is named after.
+    enum Grouping: String, CaseIterable, Identifiable, Sendable {
+        /// `Artist/Song/Pressing/file` — the original scheme, which gathers
+        /// every mix and pressing of a track under one song folder.
+        case artist = "Artist"
+        /// `Genre/file` — flat, for pulling a set together by style. Keeps
+        /// filenames as they are, so run Rename Files first if they're a
+        /// mess.
+        case genre = "Genre"
+
+        var id: String { rawValue }
+    }
+
+    static func plan(for files: [AudioFile], grouping: Grouping = .artist) -> [ArtistCollectionPlan] {
+        switch grouping {
+        case .artist: artistPlans(for: files)
+        case .genre: genrePlans(for: files)
+        }
+    }
+
     /// Builds one plan per scanned artist folder, skipping artists where
     /// every file is already exactly where this scheme would put it — the
     /// idempotency guarantee: running this again on an organized folder
     /// proposes nothing.
-    static func plan(for files: [AudioFile]) -> [ArtistCollectionPlan] {
+    private static func artistPlans(for files: [AudioFile]) -> [ArtistCollectionPlan] {
         let singles = files.filter { $0.category == .singles }
         let byRoot = Dictionary(grouping: singles, by: artistRootURL(for:))
 
@@ -413,6 +433,125 @@ enum CollectionPlanner {
         let base = (fileName as NSString).deletingPathExtension
         let clean = RenamePlanner.sanitized(suffix) ?? suffix
         return ext.isEmpty ? "\(base) (\(clean))" : "\(base) (\(clean)).\(ext)"
+    }
+
+    // MARK: - Genre grouping
+
+    /// Genre folders hold whole tracks, not pressings: `Genre/file`, flat,
+    /// built beside whatever was scanned rather than inside the artist
+    /// layout.
+    ///
+    /// Filenames are left exactly as they are, like the artist scheme —
+    /// Collect moves files, it doesn't rename them. Run Rename Files first
+    /// if the names need it.
+    private static func genrePlans(for files: [AudioFile]) -> [ArtistCollectionPlan] {
+        let singles = files.filter { $0.category == .singles }
+        let genreBySong = genresBySongGroup(in: singles)
+
+        let byDestination = Dictionary(grouping: singles) { file -> URL? in
+            guard let genre = genreBySong[songGroupKey(for: file)] else { return nil }
+            return artistRootURL(for: file).appendingPathComponent(genre)
+        }
+
+        return byDestination.compactMap { destination, groupFiles -> ArtistCollectionPlan? in
+            // Files with no genre at all: nothing to name a folder after,
+            // so they stay put rather than landing in a bucket nobody asked
+            // for. `filesWithoutAGenre` is what the window reports.
+            guard let destination else { return nil }
+            let proposals = genreProposals(for: groupFiles, destination: destination)
+            guard !proposals.isEmpty else { return nil }
+            return ArtistCollectionPlan(
+                artistFolderName: destination.lastPathComponent, artistRoot: destination,
+                proposals: proposals,
+                // No sibling relocation and no empty-folder removal here.
+                // Many song folders feed one genre folder, so moving each
+                // one's cover.jpg in would collide, and this scheme has no
+                // per-source folder it can call finished. Emptied folders
+                // are left behind for you to delete.
+                sourceFoldersToClean: [])
+        }
+        .sorted { $0.artistFolderName.localizedStandardCompare($1.artistFolderName) == .orderedAscending }
+    }
+
+    private static func genreProposals(
+        for groupFiles: [AudioFile], destination: URL
+    ) -> [CollectionProposal] {
+        var occupied = Set(groupFiles.map(\.url))
+        var proposals: [CollectionProposal] = []
+
+        for file in groupFiles.sorted(by: { $0.url.path < $1.url.path }) {
+            var fileName = file.fileName
+            var destinationURL = destination.appendingPathComponent(fileName)
+            // Rule 6 again: a flat genre folder collects files from many
+            // artist folders, so same-named files meet here far more often
+            // than in the artist scheme. The artist is the useful
+            // distinguisher.
+            if occupied.contains(destinationURL), destinationURL != file.url {
+                fileName = disambiguated(fileName: fileName, appending: artistName(for: file) ?? "2")
+                destinationURL = destination.appendingPathComponent(fileName)
+            }
+            occupied.insert(destinationURL)
+
+            guard destinationURL != file.url else { continue }
+
+            proposals.append(CollectionProposal(
+                file: file, songTitle: songTitle(for: file) ?? file.fileName,
+                pressingName: nil, proposedFileName: fileName,
+                proposedRelativePath: fileName,
+                hasOddExtension: file.fileName.lowercased().hasSuffix(".ape.flac")))
+        }
+        return proposals
+    }
+
+    /// One genre per song, not per file. Three pressings of the same track
+    /// routinely carry different genre tags — a real example from a library
+    /// here had two saying "House" and the third
+    /// "Electronic, Funk / Soul, Downtempo" — and deciding per file would
+    /// scatter them across three folders, which is the opposite of what
+    /// Collect is for. The group's commonest genre wins; ties break
+    /// alphabetically so a re-run proposes the same thing.
+    private static func genresBySongGroup(in files: [AudioFile]) -> [String: String] {
+        Dictionary(grouping: files, by: songGroupKey(for:)).compactMapValues { group in
+            let names = group.compactMap(genreFolderName(for:))
+            guard !names.isEmpty else { return nil }
+            let counts = Dictionary(names.map { ($0, 1) }, uniquingKeysWith: +)
+            return counts.max {
+                ($0.value, $1.key.lowercased()) < ($1.value, $0.key.lowercased())
+            }?.key
+        }
+    }
+
+    /// Artist plus A-side title — the same song however its pressings are
+    /// spelled or which mix they are.
+    private static func songGroupKey(for file: AudioFile) -> String {
+        let artist = songKey(artistName(for: file) ?? "")
+        let song = songKey(songTitle(for: file) ?? file.fileName)
+        return "\(artist)|\(song)"
+    }
+
+    /// The folder name for a genre tag: its **last** value.
+    ///
+    /// Tags from Discogs are ordered broad to specific —
+    /// `Electronic, Trance, House, Progressive House` — and nearly every
+    /// dance record starts with "Electronic", so the first value would put
+    /// a whole library in one folder. The last is the one worth filing
+    /// under. It also sidesteps the `/` in values like "Funk / Soul", which
+    /// can't appear in a folder name.
+    static func genreFolderName(for file: AudioFile) -> String? {
+        guard let raw = file.genre, !raw.isEmpty else { return nil }
+        let parts = raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard let last = parts.last, let name = RenamePlanner.sanitized(last), !name.isEmpty
+        else { return nil }
+        return name
+    }
+
+    /// The Singles that collecting by genre would leave where they are,
+    /// because they have no genre tag to file them under — reported by the
+    /// window so they aren't silently skipped.
+    static func filesWithoutAGenre(in files: [AudioFile]) -> [AudioFile] {
+        files.filter { $0.category == .singles && genreFolderName(for: $0) == nil }
     }
 
     // MARK: - Artist root resolution
